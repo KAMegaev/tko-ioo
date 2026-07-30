@@ -7,6 +7,11 @@ const TOLERANCE = 0.011; // допуск сверки округлённых д�
 
 const issue = (level, code, title, detail, extra = {}) => ({ level, code, title, detail, ...extra });
 
+/** Число в привычном виде: 315 970,22. */
+const fmt = (value) => (Number.isFinite(value)
+  ? value.toLocaleString('ru-RU', { maximumFractionDigits: 2 })
+  : String(value));
+
 /**
  * Сверяет расчёт с реестром и правилами заполнения.
  * @returns {{summary: object, issues: Array, checks: Array}}
@@ -40,8 +45,8 @@ export function verify({ results, registry, normById, normMapping, templateRows 
   if (Math.abs(unitsDelta) >= 1e-6 || sourcesDelta !== 0) {
     issues.push(
       issue('error', 'balance', 'Расхождение с реестром',
-        `Сумма по реестру ${round(totalUnitsRegistry, 2)} ед. / ${totalSourcesRegistry} источников, ` +
-        `в файле и нераспределённых — ${round(totalUnitsResult + unassignedUnits, 2)} ед. / ${totalSourcesResult + unassignedSources} источников.`),
+        `Сумма по реестру ${fmt(totalUnitsRegistry)} ед. / ${fmt(totalSourcesRegistry)} источников, ` +
+        `в файле и нераспределённых — ${fmt(totalUnitsResult + unassignedUnits)} ед. / ${fmt(totalSourcesResult + unassignedSources)} источников.`),
     );
   }
 
@@ -49,8 +54,8 @@ export function verify({ results, registry, normById, normMapping, templateRows 
   for (const item of results.unassigned) {
     issues.push(
       issue('error', 'unassigned', 'Данные реестра не попали в файл',
-        `«${item.category}» (зона «${item.zone}»): ${item.rows} строк, ${round(item.units, 2)} ед., ` +
-        `${item.sources} источников — ${item.reason}.`,
+        `«${item.category}» (зона «${item.zone}»): ${fmt(item.rows)} строк, ${fmt(item.units)} ед., ` +
+        `${fmt(item.sources)} источников — ${item.reason}.`,
         { category: item.category, zone: item.zone }),
     );
   }
@@ -86,7 +91,7 @@ export function verify({ results, registry, normById, normMapping, templateRows 
       if (hasData) {
         issues.push(
           issue('error', 'no-norm', 'Нет норматива при наличии данных',
-            `Строка ${row.excelRow}, «${row.templateRow.category}»: ${round(row.units, 2)} расчётных единиц, ` +
+            `Строка ${row.excelRow}, «${row.templateRow.category}»: ${fmt(row.units)} расчётных единиц, ` +
             'но норматив не сопоставлен — масса и объём останутся нулевыми.'),
         );
       }
@@ -132,8 +137,8 @@ export function verify({ results, registry, normById, normMapping, templateRows 
       if (Math.abs(writtenMass - expectedMass) > TOLERANCE || Math.abs(writtenVolume - expectedVolume) > TOLERANCE) {
         issues.push(
           issue('error', 'arithmetic', 'Ошибка расчёта',
-            `Строка ${row.excelRow}: масса ${writtenMass} т при ожидаемых ${expectedMass} т, ` +
-            `объём ${writtenVolume} м³ при ожидаемых ${expectedVolume} м³.`),
+            `Строка ${row.excelRow}: масса ${fmt(writtenMass)} т при ожидаемых ${fmt(expectedMass)} т, ` +
+            `объём ${fmt(writtenVolume)} м³ при ожидаемых ${fmt(expectedVolume)} м³.`),
         );
       }
       const writtenDensity = round(row.density, 2) ?? 0;
@@ -154,7 +159,7 @@ export function verify({ results, registry, normById, normMapping, templateRows 
   if (registry.zeroRows > 0) {
     issues.push(
       issue('info', 'zero-sources', 'Источники с нулевым количеством единиц',
-        `В реестре ${registry.zeroRows} строк с нулевым количеством расчётных единиц — ` +
+        `В реестре ${fmt(registry.zeroRows)} строк с нулевым количеством расчётных единиц — ` +
         'они не учтены в столбце «Количество источников», но учтены в сумме единиц (вклад нулевой).'),
     );
   }

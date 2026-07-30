@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Выгрузка общих сведений по ТКО</title>
+<meta name="description" content="Сведение реестра источников образования отходов и нормативов накопления ТКО в форму общих сведений">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>♻️</text></svg>">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<header class="page-header">
+  <div class="wrap">
+    <h1>Выгрузка общих сведений по ТКО</h1>
+    <p class="lead">
+      Сведение реестра источников образования отходов с нормативами накопления
+      и заполнение формы общих сведений. Файлы обрабатываются прямо в браузере
+      и никуда не передаются.
+    </p>
+  </div>
+</header>
+
+<nav class="steps wrap" id="steps" aria-label="Этапы обработки">
+  <button type="button" class="step" data-step="files"><span>1</span>Файлы</button>
+  <button type="button" class="step" data-step="norms" disabled><span>2</span>Нормативы</button>
+  <button type="button" class="step" data-step="registry" disabled><span>3</span>Реестр</button>
+  <button type="button" class="step" data-step="result" disabled><span>4</span>Расчёт</button>
+  <button type="button" class="step" data-step="check" disabled><span>5</span>Проверка</button>
+  <button type="button" class="step" data-step="export" disabled><span>6</span>Выгрузка</button>
+</nav>
+
+<main class="wrap">
+
+  <section class="panel" id="panel-files" data-panel="files">
+    <h2>1. Исходные файлы</h2>
+    <p class="hint">
+      Нужны три вида файлов. Названия могут быть любыми — вид файла определяется
+      по его содержимому, при необходимости его можно изменить вручную.
+    </p>
+
+    <div class="dropzone" id="dropzone">
+      <p><strong>Перетащите файлы сюда</strong> или</p>
+      <label class="button">
+        Выбрать файлы
+        <input type="file" id="file-input" multiple accept=".xlsx,.xlsm,.xls,.docx,.ods" hidden>
+      </label>
+      <p class="hint">Реестр ИОО и общие сведения — .xlsx, нормативы — .docx или .xlsx</p>
+    </div>
+
+    <div id="file-list" class="file-list"></div>
+    <div id="file-summary"></div>
+  </section>
+
+  <section class="panel" id="panel-norms" data-panel="norms" hidden>
+    <h2>2. Сопоставление нормативов</h2>
+    <p class="hint">
+      Каждой категории из формы общих сведений подбирается норматив из файла
+      нормативов. Проверьте подобранные соответствия и при необходимости
+      измените их: выберите другой норматив, задайте формулу
+      (например, <code>[n5] + [n7]</code> — норматив вставляется из списка) или введите значения вручную.
+    </p>
+    <div class="toolbar">
+      <label>Показать:
+        <select id="norms-filter">
+          <option value="all">все категории</option>
+          <option value="attention">требующие внимания</option>
+          <option value="none">не сопоставленные</option>
+          <option value="manual">изменённые вручную</option>
+        </select>
+      </label>
+      <label>Поиск: <input type="search" id="norms-search" placeholder="часть наименования"></label>
+      <span class="spacer"></span>
+      <span id="norms-stats" class="stats"></span>
+    </div>
+    <div class="table-scroll"><table class="grid" id="norms-table"></table></div>
+  </section>
+
+  <section class="panel" id="panel-registry" data-panel="registry" hidden>
+    <h2>3. Сопоставление данных реестра</h2>
+    <p class="hint">
+      Категории и зоны деятельности из реестра ИОО привязываются к строкам формы.
+      Непривязанные данные в выгрузку не попадут — по ним будет замечание на этапе проверки.
+    </p>
+    <h3>Зоны деятельности</h3>
+    <div class="table-scroll"><table class="grid" id="zones-table"></table></div>
+    <h3>Категории потребителей</h3>
+    <div class="toolbar">
+      <label>Показать:
+        <select id="registry-filter">
+          <option value="all">все категории</option>
+          <option value="attention">требующие внимания</option>
+          <option value="none">не сопоставленные</option>
+          <option value="manual">изменённые вручную</option>
+        </select>
+      </label>
+      <label>Поиск: <input type="search" id="registry-search" placeholder="часть наименования"></label>
+      <span class="spacer"></span>
+      <span id="registry-stats" class="stats"></span>
+    </div>
+    <div class="table-scroll"><table class="grid" id="registry-table"></table></div>
+  </section>
+
+  <section class="panel" id="panel-result" data-panel="result" hidden>
+    <h2>4. Расчёт по строкам формы</h2>
+    <p class="hint">
+      Так будет заполнен файл общих сведений. Количество и порядок строк, а также
+      столбцы A–E остаются без изменений; столбец K не заполняется.
+    </p>
+    <div class="toolbar">
+      <label><input type="checkbox" id="result-only-data"> только строки с данными</label>
+      <span class="spacer"></span>
+      <span id="result-stats" class="stats"></span>
+    </div>
+    <div class="table-scroll"><table class="grid compact" id="result-table"></table></div>
+  </section>
+
+  <section class="panel" id="panel-check" data-panel="check" hidden>
+    <h2>5. Проверка</h2>
+    <div id="check-summary" class="cards"></div>
+    <h3>Контрольные сверки с реестром</h3>
+    <div class="table-scroll"><table class="grid" id="check-table"></table></div>
+    <h3>Замечания</h3>
+    <div id="check-issues"></div>
+  </section>
+
+  <section class="panel" id="panel-export" data-panel="export" hidden>
+    <h2>6. Выгрузка результатов</h2>
+    <p class="hint">Файлы сохраняются на ваш компьютер.</p>
+    <div class="downloads">
+      <button type="button" class="button primary" id="download-template">
+        Обновлённый файл общих сведений
+        <small>исходный файл с заполненными столбцами F–J и нормативами</small>
+      </button>
+      <button type="button" class="button" id="download-report">
+        Отчёт: соответствия и аналитика проверки
+        <small>таблицы соответствий, расчёт по строкам, замечания</small>
+      </button>
+      <button type="button" class="button" id="download-rules">
+        Правила сопоставления (.json)
+        <small>чтобы применить те же правила в следующий раз</small>
+      </button>
+      <label class="button">
+        Загрузить правила сопоставления
+        <small>восстановить ранее сохранённые соответствия</small>
+        <input type="file" id="rules-input" accept=".json" hidden>
+      </label>
+    </div>
+    <div id="export-log" class="log"></div>
+  </section>
+
+</main>
+
+<footer class="wrap page-footer">
+  <p>
+    Обработка выполняется полностью в браузере: файлы не загружаются на сервер.
+    <a href="https://github.com/KAMegaev/tko-ioo">Исходный код</a>
+  </p>
+</footer>
+
+<div class="overlay" id="overlay" hidden>
+  <div class="overlay-box">
+    <div class="spinner"></div>
+    <p id="overlay-text">Обработка…</p>
+  </div>
+</div>
+
+<div class="toasts" id="toasts"></div>
+
+<script src="vendor/jszip.min.js"></script>
+<script src="vendor/xlsx.full.min.js"></script>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

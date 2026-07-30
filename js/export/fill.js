@@ -67,8 +67,10 @@ export async function fillTemplate(template, results) {
       document.setCell(sheet, excelRow, columns.density, round(row.density, 2) ?? 0, decimalStyle);
     }
 
-    document.setCell(sheet, excelRow, normMassCol, row.normMass ?? null, plainStyle);
-    document.setCell(sheet, excelRow, normVolumeCol, row.normVolume ?? null, plainStyle);
+    // Нормативы задаются с точностью до пяти знаков; при вычислении по формуле
+    // накапливается шум двоичного представления — его нужно убрать.
+    document.setCell(sheet, excelRow, normMassCol, round(row.normMass, 6), plainStyle);
+    document.setCell(sheet, excelRow, normVolumeCol, round(row.normVolume, 6), plainStyle);
   }
 
   document.updateDimension(sheet, maxRow, normVolumeCol);
