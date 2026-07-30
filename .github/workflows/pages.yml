@@ -31,7 +31,11 @@ jobs:
           cp -r index.html css js vendor _site/
           touch _site/.nojekyll
 
+      # enablement включает Pages в репозитории при первом запуске,
+      # чтобы публикация не требовала ручной настройки.
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
