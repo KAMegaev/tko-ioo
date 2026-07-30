@@ -66,8 +66,9 @@ python3 -m http.server 8000
 ## Публикация
 
 Публикуется на GitHub Pages рабочим процессом `.github/workflows/pages.yml`
-при изменениях в `main`. Один раз нужно включить публикацию в настройках
-репозитория: **Settings → Pages → Source: GitHub Actions**.
+при изменениях в `main` или в рабочей ветке разработки. Один раз нужно
+включить публикацию в настройках репозитория:
+**Settings → Pages → Source: GitHub Actions**.
 
 ## Разработка
 
