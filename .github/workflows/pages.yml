@@ -2,9 +2,7 @@ name: Публикация на GitHub Pages
 
 on:
   push:
-    branches:
-      - main
-      - claude/tko-data-processing-app-y3bona
+    branches: [main]
   workflow_dispatch:
 
 permissions:
