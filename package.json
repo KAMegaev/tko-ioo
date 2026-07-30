@@ -1,0 +1,15 @@
+{
+  "name": "tko-ioo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Веб-приложение для подготовки выгрузки общих сведений по ТКО",
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/"
+  },
+  "devDependencies": {
+    "@xmldom/xmldom": "^0.9.6",
+    "jszip": "^3.10.1",
+    "xlsx": "^0.18.5"
+  }
+}
