@@ -2,6 +2,13 @@ name = "tko-ioo-ai"
 main = "index.js"
 compatibility_date = "2026-01-01"
 
+# Постоянный адрес вида https://tko-ioo-ai.<поддомен>.workers.dev — он нужен приложению.
+workers_dev = true
+
+# Отдельные адреса для каждой версии не нужны: это лишние публичные точки,
+# через которые можно расходовать ключ.
+preview_urls = false
+
 # Ограничение частоты обращений: 20 запросов в минуту с одного адреса.
 [[unsafe.bindings]]
 name = "RATE_LIMITER"
