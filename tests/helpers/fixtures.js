@@ -41,7 +41,14 @@ export function templateWorkbook(rows) {
 
 /** Книга реестра ИОО. */
 export function registryWorkbook(rows, header = ['Категория потребителя', 'Количество расчетных единиц', 'Зона деятельности']) {
-  const aoa = [header, ...rows.map((row) => [row.category, row.units, row.zone])];
+  // Порядок столбцов задаётся шапкой: выгрузки разных регионов отличаются
+  // и составом, и порядком колонок.
+  const hasUnits = header.some((title) => /количеств/i.test(title));
+  const hasMunicipality = header.some((title) => /муниципальн/i.test(title));
+  const aoa = [header, ...rows.map((row) => (hasUnits
+    ? [row.category, row.units, row.zone]
+    : [row.municipality ?? 'Кемеровский городской округ', row.category, row.zone]))];
+  if (!hasUnits && !hasMunicipality) throw new Error('Шапка без количества единиц должна содержать МО');
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(aoa), 'Реестр ИОО');
   return XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });

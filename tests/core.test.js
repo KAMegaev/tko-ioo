@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import './helpers/env.js';
 
 import { normalize, parseNumber, similarity, tokens } from '../js/lib/text.js';
-import { massFactor, volumeFactor, isMassHeader, isVolumeHeader, unitBasis } from '../js/lib/units.js';
+import {
+  massFactor, volumeFactor, isMassHeader, isVolumeHeader, unitBasis, parseMeasure,
+} from '../js/lib/units.js';
 import { evaluate, validate, referencedIds, humanize } from '../js/lib/formula.js';
 import { round } from '../js/lib/calc.js';
 import { rankCandidates, templateCategories } from '../js/lib/match.js';
@@ -116,4 +118,33 @@ test('категории шаблона собираются с учётом п�
   assert.equal(categories.length, 2);
   assert.deepEqual(categories[0].rows, [0, 1]);
   assert.equal(categories[0].basis, 'sqm');
+});
+
+test('размерность и расчётная единица читаются прямо из ячейки', () => {
+  // Приказ Кузбасса: «2,073 м3/1 проживающего человека в год».
+  const volume = parseMeasure('2,073 м3/1 проживающего человека в год');
+  assert.equal(volume.value, 2.073);
+  assert.equal(volume.kind, 'volume');
+  assert.equal(volume.factor, 1);
+  assert.equal(volume.basis, 'person');
+
+  const mass = parseMeasure('0,247027 тонн/1 проживающего человека в год');
+  assert.equal(mass.kind, 'mass');
+  assert.equal(mass.factor, 1000, 'тонны приводятся к килограммам');
+
+  assert.equal(parseMeasure('0,341 м3/1 место в год').basis, 'place');
+  assert.equal(parseMeasure('0,319 м3/1 м2 общей площади в год').basis, 'sqm');
+  assert.equal(parseMeasure('0,012 м3/1 метр общей площади в год').basis, 'sqm');
+  assert.equal(parseMeasure('2,360 м3/1 участник (член) в год').basis, 'person',
+    'участник товарищества — человек, а не земельный участок');
+});
+
+test('шапка и прочерк за значение не принимаются', () => {
+  // Иначе шапка «куб.м на 1 кв. метр в год» была бы прочитана как значение 1.
+  assert.equal(parseMeasure('куб.м на 1 кв. метр в год'), null);
+  assert.equal(parseMeasure('кг в год'), null);
+  assert.equal(parseMeasure('-'), null);
+  assert.equal(parseMeasure(''), null);
+  assert.equal(parseMeasure('Норматив накопления твердых коммунальных отходов'), null);
+  assert.equal(parseMeasure('0,08457').value, 0.08457, 'чистое число остаётся значением');
 });

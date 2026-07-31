@@ -68,8 +68,10 @@ export function buildResults({
   normMapping,
   normById,
 }) {
-  // Каждая группа реестра адресуется в строку шаблона: зона → зона, категория → категория.
-  const targets = new Map(); // «зонаШаблона||категорияШаблона» → агрегат
+  // Муниципальные образования участвуют в группировке, только если форма
+  // общих сведений их различает: в большинстве выгрузок столбец МО пуст.
+  const useMunicipality = templateRows.some((row) => Boolean(row.municipality));
+  const targets = new Map(); // «зона||МО||категория» → агрегат
   const unassigned = [];
 
   for (const group of registryGroups.values()) {
@@ -77,29 +79,36 @@ export function buildResults({
     const categoryRule = registryMapping.get(group.categoryKey);
     const zoneKey = zoneRule && zoneRule.templateKey;
     const categoryKey = categoryRule && categoryRule.templateKey;
-    if (!zoneKey || !categoryKey) {
+    const reason = !zoneKey ? 'зона не сопоставлена'
+      : !categoryKey ? 'категория не сопоставлена'
+        : useMunicipality && !group.municipalityKey ? 'в реестре не указано муниципальное образование'
+          : null;
+    if (reason) {
       unassigned.push({
         zone: group.zone,
+        municipality: group.municipality,
         category: group.category,
         sources: group.sources,
-        units: group.units,
+        units: group.unitsKnown ? group.units : 0,
         rows: group.rows,
-        reason: !zoneKey ? 'зона не сопоставлена' : 'категория не сопоставлена',
+        reason,
       });
       continue;
     }
-    const key = `${zoneKey}||${categoryKey}`;
+    const key = `${zoneKey}||${useMunicipality ? group.municipalityKey : ''}||${categoryKey}`;
     let target = targets.get(key);
     if (!target) {
-      target = { sources: 0, units: 0, rows: 0, zeroSources: 0, parts: [] };
+      target = { sources: 0, units: 0, unitsKnown: true, rows: 0, zeroSources: 0, parts: [] };
       targets.set(key, target);
     }
     target.sources += group.sources;
     target.units += group.units;
+    if (!group.unitsKnown) target.unitsKnown = false;
     target.rows += group.rows;
     target.zeroSources += group.sourcesWithZero;
     target.parts.push({
       zone: group.zone,
+      municipality: group.municipality,
       category: group.category,
       sources: group.sources,
       units: group.units,
@@ -111,7 +120,8 @@ export function buildResults({
   const rows = templateRows.map((templateRow) => {
     const categoryKey = normalize(templateRow.category);
     const zoneKey = normalize(templateRow.zone);
-    const key = `${zoneKey}||${categoryKey}`;
+    const municipalityKey = useMunicipality ? normalize(templateRow.municipality) : '';
+    const key = `${zoneKey}||${municipalityKey}||${categoryKey}`;
     const duplicate = seen.has(key);
     if (duplicate) duplicates.push({ excelRow: templateRow.excelRow, zone: templateRow.zone, category: templateRow.category });
     seen.add(key);
@@ -122,6 +132,7 @@ export function buildResults({
 
     const units = aggregate ? aggregate.units : 0;
     const sources = aggregate ? aggregate.sources : 0;
+    const unitsKnown = aggregate ? aggregate.unitsKnown : true;
     const massKg = norm.mass === null ? null : norm.mass * units;
     const mass = massKg === null ? null : massKg / KG_PER_TONNE;
     const volume = norm.volume === null ? null : norm.volume * units;
@@ -132,8 +143,10 @@ export function buildResults({
       excelRow: templateRow.excelRow,
       categoryKey,
       zoneKey,
+      municipalityKey,
       duplicate,
       sources,
+      unitsKnown,
       units,
       registryRows: aggregate ? aggregate.rows : 0,
       zeroSources: aggregate ? aggregate.zeroSources : 0,
@@ -148,7 +161,8 @@ export function buildResults({
     };
   });
 
-  const usedKeys = new Set(rows.filter((row) => !row.duplicate).map((row) => `${row.zoneKey}||${row.categoryKey}`));
+  const usedKeys = new Set(rows.filter((row) => !row.duplicate)
+    .map((row) => `${row.zoneKey}||${row.municipalityKey}||${row.categoryKey}`));
   for (const [key, target] of targets) {
     if (!usedKeys.has(key)) {
       for (const part of target.parts) {
@@ -157,7 +171,7 @@ export function buildResults({
     }
   }
 
-  return { rows, unassigned, duplicates };
+  return { rows, unassigned, duplicates, useMunicipality };
 }
 
 /** Значения, которые попадут в файл (с учётом округления и замены пустых на 0). */

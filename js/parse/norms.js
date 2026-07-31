@@ -1,9 +1,32 @@
 // Разбор файла «Нормативы накопления ТКО»: .docx (приказ) или .xlsx.
 
-import { normalize, parseNumber } from '../lib/text.js';
-import { unitBasis, massFactor, volumeFactor, isMassHeader, isVolumeHeader } from '../lib/units.js';
+import { normalize } from '../lib/text.js';
+import {
+  unitBasis, massFactor, volumeFactor, isMassHeader, isVolumeHeader, parseMeasure,
+} from '../lib/units.js';
 
-const META_ROW = /список изменяющих|действие изменений|в ред\.|утративш/i;
+// Строки-примечания и отсылки к изменяющим документам данными не являются.
+const META_ROW = /список изменяющих|действие изменений|в ред\.|введен|введена|введено|утратил|исключен|дополнен|примечани|^\s*<?\*/i;
+
+/** Строка, объединённая на всю ширину, — это заголовок раздела, а не данные. */
+function isSpanningRow(row) {
+  const cells = row.map((cell) => String(cell ?? '').trim()).filter(Boolean);
+  return cells.length > 1 && new Set(cells).size === 1;
+}
+
+/** Строка вида «1 | 2 | 3 | 4» — нумерация столбцов, часть шапки. */
+function isColumnNumberingRow(row) {
+  const cells = row.map((cell) => String(cell ?? '').trim()).filter(Boolean);
+  if (cells.length < 2) return false;
+  return cells.every((cell, index) => /^\d{1,2}\.?$/.test(cell) && Number(cell.replace('.', '')) === index + 1);
+}
+
+/** Данные это или служебная строка таблицы. */
+function isServiceRow(row, nameColumn = -1) {
+  if (isSpanningRow(row) || isColumnNumberingRow(row)) return true;
+  const name = nameColumn >= 0 ? String(row[nameColumn] ?? '').trim() : '';
+  return Boolean(name) && META_ROW.test(name);
+}
 
 /** Непустые строки таблицы — с ними работают и разметка, и извлечение. */
 export function significantRows(grid) {
@@ -60,26 +83,46 @@ export function extractWithLayout(grid, layout, context = {}) {
   const volumeCol = volumeColumn;
   const firstDataRow = headerRowCount;
   const entries = [];
+
   for (const row of rows.slice(firstDataRow)) {
+    if (isServiceRow(row, nameCol)) continue;
     const name = String(row[nameCol] || '').trim().replace(/\s+/g, ' ');
-    if (!name || META_ROW.test(name)) continue;
-    const mass = massCol >= 0 ? parseNumber(row[massCol]) : null;
-    const volume = volumeCol >= 0 ? parseNumber(row[volumeCol]) : null;
-    if (mass === null && volume === null) continue;
+    if (!name) continue;
+
+    // Размерность может стоять в самой ячейке («2,073 м3/1 человека в год»)
+    // либо только в шапке — тогда берётся множитель столбца.
+    const massCell = massCol >= 0 ? parseMeasure(row[massCol]) : null;
+    const volumeCell = volumeCol >= 0 ? parseMeasure(row[volumeCol]) : null;
+    if (!massCell && !volumeCell) continue;
+    if (massCell && massCell.kind === 'volume') continue;
+    if (volumeCell && volumeCell.kind === 'mass') continue;
+
+    const mass = massCell ? massCell.value * (massCell.factor ?? toMass ?? 1) : null;
+    const volume = volumeCell ? volumeCell.value * (volumeCell.factor ?? toVolume ?? 1) : null;
+
     const unitText = unitCol >= 0 ? String(row[unitCol] || '').trim() : '';
+    const rowBasis =
+      (unitText && unitBasis(unitText) !== 'other' ? unitBasis(unitText) : null)
+      || (massCell && massCell.basis)
+      || (volumeCell && volumeCell.basis)
+      || fallbackBasis
+      || 'other';
+
     entries.push({
       name,
-      basis: (unitText && unitBasis(unitText)) || fallbackBasis || 'other',
-      unitText: unitText || headers[massCol] || headers[volumeCol] || '',
-      mass: mass === null ? null : mass * toMass,
-      volume: volume === null ? null : volume * toVolume,
-      rawMass: mass,
-      rawVolume: volume,
-      massUnit: massCol >= 0 ? headers[massCol] : '',
-      volumeUnit: volumeCol >= 0 ? headers[volumeCol] : '',
+      basis: rowBasis,
+      unitText: unitText || (volumeCell && volumeCell.unitText) || (massCell && massCell.unitText)
+        || headers[massCol] || headers[volumeCol] || '',
+      mass,
+      volume,
+      rawMass: massCell ? massCell.value : null,
+      rawVolume: volumeCell ? volumeCell.value : null,
+      massUnit: (massCell && massCell.unitText) || (massCol >= 0 ? headers[massCol] : ''),
+      volumeUnit: (volumeCell && volumeCell.unitText) || (volumeCol >= 0 ? headers[volumeCol] : ''),
       table: context.title || '',
     });
   }
+
   if (!entries.length) return null;
   return {
     entries,
@@ -101,29 +144,117 @@ export function extractWithLayout(grid, layout, context = {}) {
   };
 }
 
+/** Первая строка с данными: не служебная, с наименованием и хотя бы одним значением. */
+function findFirstDataRow(rows) {
+  for (let index = 1; index < rows.length; index += 1) {
+    const row = rows[index];
+    if (isSpanningRow(row) || isColumnNumberingRow(row)) continue;
+    const cells = row.map((cell) => String(cell ?? '').trim());
+    const hasMeasure = cells.some((cell) => parseMeasure(cell) !== null);
+    const hasName = cells.some((cell) => /[а-яa-z]{4}/i.test(cell) && !META_ROW.test(cell));
+    if (hasMeasure && hasName) return index;
+  }
+  return -1;
+}
+
 /**
- * Подбирает разметку таблицы по её шапке.
+ * Считает по каждому столбцу, что в нём лежит: значения (и каких размерностей)
+ * или текст. Шапка бывает бесполезной — «показатели объема» без слова «куб.м», —
+ * поэтому столбцы опознаются прежде всего по содержимому.
+ */
+function profileColumns(rows, firstDataRow) {
+  const width = Math.max(0, ...rows.map((row) => row.length));
+  const stats = Array.from({ length: width }, () => ({ mass: 0, volume: 0, plain: 0, text: 0 }));
+  for (const row of rows.slice(firstDataRow)) {
+    if (isSpanningRow(row) || isColumnNumberingRow(row)) continue;
+    for (let col = 0; col < width; col += 1) {
+      const cell = String(row[col] ?? '').trim();
+      if (!cell) continue;
+      const measure = parseMeasure(cell);
+      if (measure) {
+        if (measure.kind === 'mass') stats[col].mass += 1;
+        else if (measure.kind === 'volume') stats[col].volume += 1;
+        else stats[col].plain += 1;
+      } else if (/[а-яa-z]{4}/i.test(cell)) {
+        stats[col].text += 1;
+      }
+    }
+  }
+  return stats;
+}
+
+const NUMBERING_HEADER = /^\s*(n|№)\s*(п\/п)?\s*$/i;
+
+/**
+ * Подбирает разметку таблицы: сколько строк занимает шапка, где наименования,
+ * где значения по массе и по объёму.
  * @returns {object|null} разметка либо null, если таблица не похожа на нормативы
  */
 export function detectLayout(grid) {
   const rows = significantRows(grid);
   if (rows.length < 2) return null;
 
-  // Шапка кончается там, где встретилась первая строка с числом.
-  const firstDataRow = rows.findIndex(
-    (row, index) => index > 0 && row.some((cell) => parseNumber(cell) !== null),
-  );
+  const firstDataRow = findFirstDataRow(rows);
   if (firstDataRow < 1) return null;
 
   const headers = headerTexts(rows, firstDataRow);
-  const nameColumn = headers.findIndex((h) => /наименование|категор/i.test(h));
-  const unitColumn = headers.findIndex(
-    (h) => /расчетн[а-я]*\s+единиц|единиц[а-я]*\s+измерени/i.test(normalize(h)),
-  );
-  const massColumn = headers.findIndex((h, i) => i !== nameColumn && isMassHeader(h));
-  const volumeColumn = headers.findIndex((h, i) => i !== nameColumn && isVolumeHeader(h));
-  if (nameColumn < 0 || (massColumn < 0 && volumeColumn < 0)) return null;
+  const stats = profileColumns(rows, firstDataRow);
+  const width = stats.length;
 
+  // Наименование: по заголовку, иначе — столбец с наибольшим числом текстовых ячеек.
+  let nameColumn = headers.findIndex(
+    (header) => !NUMBERING_HEADER.test(header) && /наименование|категор/i.test(header),
+  );
+  if (nameColumn < 0) {
+    let best = -1;
+    for (let col = 0; col < width; col += 1) {
+      if (stats[col].text > 0 && (best < 0 || stats[col].text > stats[best].text)) best = col;
+    }
+    nameColumn = best;
+  }
+  if (nameColumn < 0) return null;
+
+  const unitColumn = headers.findIndex(
+    (header) => /расчетн[а-я]*\s+единиц|единиц[а-я]*\s+измерени/i.test(normalize(header)),
+  );
+
+  // 1. Размерность указана в самих ячейках.
+  const pick = (kind) => {
+    let best = -1;
+    for (let col = 0; col < width; col += 1) {
+      if (col === nameColumn || col === unitColumn) continue;
+      if (stats[col][kind] > 0 && (best < 0 || stats[col][kind] > stats[best][kind])) best = col;
+    }
+    return best;
+  };
+  let massColumn = pick('mass');
+  let volumeColumn = pick('volume');
+
+  // 2. Иначе — размерность из шапки столбца.
+  if (massColumn < 0) {
+    massColumn = headers.findIndex(
+      (header, col) => col !== nameColumn && col !== volumeColumn && stats[col].plain > 0 && isMassHeader(header),
+    );
+  }
+  if (volumeColumn < 0) {
+    volumeColumn = headers.findIndex(
+      (header, col) => col !== nameColumn && col !== massColumn && stats[col].plain > 0 && isVolumeHeader(header),
+    );
+  }
+
+  // 3. Иначе — по словам «масса» и «объём» в шапке.
+  if (massColumn < 0) {
+    massColumn = headers.findIndex(
+      (header, col) => col !== nameColumn && col !== volumeColumn && stats[col].plain > 0 && /масс/i.test(header),
+    );
+  }
+  if (volumeColumn < 0) {
+    volumeColumn = headers.findIndex(
+      (header, col) => col !== nameColumn && col !== massColumn && stats[col].plain > 0 && /объем|объём/i.test(header),
+    );
+  }
+
+  if (massColumn < 0 && volumeColumn < 0) return null;
   return { headerRowCount: firstDataRow, nameColumn, unitColumn, massColumn, volumeColumn };
 }
 

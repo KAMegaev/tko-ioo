@@ -48,9 +48,12 @@ export function validateEndpoint(url) {
 
 /**
  * Запрашивает разметку у прокси.
+ * @param {string} endpoint адрес прокси
+ * @param {string} task 'norms-markup' или 'registry-markup'
+ * @param {Array} tables образец: таблицы приказа либо листы книги
  * @returns {Promise<{result: object, usage: object, model: string}>}
  */
-export async function requestNormsMarkup(endpoint, tables) {
+export async function requestMarkup(endpoint, task, tables) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT);
   let response;
@@ -58,7 +61,7 @@ export async function requestNormsMarkup(endpoint, tables) {
     response = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ task: 'norms-markup', tables }),
+      body: JSON.stringify({ task, tables }),
       signal: controller.signal,
     });
   } catch (error) {
@@ -80,3 +83,9 @@ export async function requestNormsMarkup(endpoint, tables) {
   if (!data.result) throw new Error('Помощник не вернул разметку');
   return data;
 }
+
+/** Разметка таблиц нормативов. */
+export const requestNormsMarkup = (endpoint, tables) => requestMarkup(endpoint, 'norms-markup', tables);
+
+/** Разметка выгрузки реестра. */
+export const requestRegistryMarkup = (endpoint, sheets) => requestMarkup(endpoint, 'registry-markup', sheets);

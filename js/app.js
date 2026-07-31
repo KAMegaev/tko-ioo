@@ -1,7 +1,7 @@
 // Состояние приложения и связывание этапов обработки.
 
 import { parseNorms, applyLayouts } from './parse/norms.js';
-import { parseRegistryWorkbook, aggregateRegistry } from './parse/registry.js';
+import { parseRegistryWorkbook, aggregateRegistry, buildRegistrySample } from './parse/registry.js';
 import { parseTemplate } from './parse/template.js';
 import {
   templateCategories, matchNorms, matchRegistryCategories, matchZones, STATUS,
@@ -15,8 +15,14 @@ import { el, $, clear, toast, withOverlay, download } from './ui/dom.js';
 import { renderNormsMapping } from './ui/mapping-view.js';
 import { renderFiles, renderZones, renderRegistryMapping, renderResults, renderCheck } from './ui/views.js';
 import { renderAi } from './ui/ai-view.js';
-import { getEndpoint, setEndpoint, validateEndpoint, requestNormsMarkup, isCustomEndpoint } from './ai/client.js';
+import {
+  getEndpoint, setEndpoint, validateEndpoint, requestNormsMarkup, requestRegistryMarkup,
+  isCustomEndpoint,
+} from './ai/client.js';
 import { buildSample, validateMarkup, compare } from './ai/norms-markup.js';
+import {
+  describeSample as describeRegistrySample, validateMarkup as validateRegistryMarkup,
+} from './ai/registry-markup.js';
 
 const RULES_STORAGE_KEY = 'tko-ioo.rules.v1';
 
@@ -38,7 +44,11 @@ const state = {
   verification: null,
   // Правила, заданные пользователем: переживают повторную загрузку файлов.
   rules: { norms: {}, registry: {}, zones: {} },
-  ai: { endpoint: '', status: 'idle', proposal: null, error: null, sample: null },
+  ai: {
+    endpoint: '',
+    norms: { status: 'idle', proposal: null, error: null, sample: null },
+    registry: { status: 'idle', proposal: null, error: null, sample: null },
+  },
   step: 'files',
 };
 
@@ -96,10 +106,14 @@ async function parseEntry(entry) {
         + (norms.source !== 'эвристика' ? `, разметка: ${norms.source}` : '')
       : `таблиц в файле: ${norms.rawTables.length}, нормативы не распознаны`;
   } else if (entry.kind === 'registry') {
-    const registry = parseRegistryWorkbook(entry.buffer.slice(0), entry.name, libs.XLSX);
+    const registry = parseRegistryWorkbook(
+      entry.buffer.slice(0), entry.name, libs.XLSX, savedRegistryMarkup(),
+    );
     entry.parsed = registry;
-    entry.info = `лист «${registry.sheetName}», строк: ${registry.rows.length}` +
-      (registry.warningsTotal ? `, предупреждений: ${registry.warningsTotal}` : '');
+    entry.info = `лист «${registry.sheetName}», строк: ${registry.rows.length}`
+      + (registry.hasUnits ? '' : ', без количества расчётных единиц')
+      + (registry.source !== 'эвристика' ? `, разметка: ${registry.source}` : '')
+      + (registry.warningsTotal ? `, предупреждений: ${registry.warningsTotal}` : '');
   } else {
     entry.info = 'Укажите вид файла вручную';
   }
@@ -139,6 +153,12 @@ async function addFiles(fileList) {
  * Применяет разметку, сохранённую при прошлой обработке.
  * Файл мог смениться, поэтому результат принимается только если он осмыслен.
  */
+function savedRegistryMarkup() {
+  const saved = state.rules.registryMarkup;
+  if (!saved || !saved.columns) return null;
+  return { ...saved, source: `${saved.source || 'разметка'} (сохранена)` };
+}
+
 function applySavedLayout(norms) {
   const saved = state.rules.normsLayout;
   if (!saved) return norms;
@@ -377,27 +397,47 @@ const actions = {
 
   async aiRun() {
     if (!state.norms || !state.ai.endpoint) return;
-    state.ai = { ...state.ai, status: 'running', error: null, proposal: null, sample: null };
+    const task = state.ai.norms;
+    Object.assign(task, { status: 'running', error: null, proposal: null, sample: null });
     renderAi(state, actions);
     try {
-      const sample = buildSample(state.norms);
-      state.ai.sample = sample;
-      const answer = await requestNormsMarkup(state.ai.endpoint, sample);
+      task.sample = buildSample(state.norms);
+      const answer = await requestNormsMarkup(state.ai.endpoint, task.sample);
       const checked = validateMarkup(state.norms, answer.result);
       if (checked.ok) checked.compare = compare(state.norms, checked.preview);
-      state.ai.proposal = checked;
-      state.ai.status = 'idle';
-      if (!checked.ok) toast('Предложение помощника не прошло проверку по файлу', 'error');
+      task.proposal = checked;
+      if (!checked.ok) toast('Предложение помощника по нормативам не прошло проверку', 'error');
     } catch (error) {
-      state.ai.status = 'idle';
-      state.ai.error = error.message;
+      task.error = error.message;
       toast(error.message, 'error');
     }
+    task.status = 'idle';
+    renderAi(state, actions);
+  },
+
+  async aiRunRegistry() {
+    const entry = state.files.find((item) => item.kind === 'registry');
+    if (!entry || !entry.buffer || !state.ai.endpoint) return;
+    const task = state.ai.registry;
+    Object.assign(task, { status: 'running', error: null, proposal: null, sample: null });
+    renderAi(state, actions);
+    try {
+      task.sample = buildRegistrySample(entry.buffer.slice(0), libs.XLSX);
+      const answer = await requestRegistryMarkup(state.ai.endpoint, task.sample);
+      task.proposal = validateRegistryMarkup(
+        entry.buffer.slice(0), task.sample, answer.result, entry.name, libs.XLSX,
+      );
+      if (!task.proposal.ok) toast('Предложение помощника по реестру не прошло проверку', 'error');
+    } catch (error) {
+      task.error = error.message;
+      toast(error.message, 'error');
+    }
+    task.status = 'idle';
     renderAi(state, actions);
   },
 
   aiApply() {
-    const proposal = state.ai.proposal;
+    const proposal = state.ai.norms.proposal;
     if (!proposal || !proposal.ok) return;
     const entry = state.files.find((item) => item.kind === 'norms' && item.parsed);
     if (entry) {
@@ -407,24 +447,46 @@ const actions = {
     }
     state.rules.normsLayout = proposal.markup;
     persistRules();
-    state.ai.proposal = null;
+    state.ai.norms.proposal = null;
     collectParsed();
     refreshAll();
-    toast(`Разметка применена: нормативов ${proposal.preview.entries.length}`, 'ok');
+    toast(`Разметка нормативов применена: ${proposal.preview.entries.length}`, 'ok');
   },
 
-  aiDismiss() {
-    state.ai.proposal = null;
-    state.ai.sample = null;
+  aiApplyRegistry() {
+    const proposal = state.ai.registry.proposal;
+    if (!proposal || !proposal.ok) return;
+    const entry = state.files.find((item) => item.kind === 'registry');
+    if (entry) {
+      entry.parsed = proposal.parsed;
+      entry.info = `лист «${proposal.parsed.sheetName}», строк: ${proposal.parsed.rows.length}`
+        + (proposal.parsed.hasUnits ? '' : ', без количества расчётных единиц')
+        + `, разметка: ${proposal.parsed.source}`;
+    }
+    state.rules.registryMarkup = proposal.markup;
+    persistRules();
+    state.ai.registry.proposal = null;
+    collectParsed();
+    refreshAll();
+    toast(`Разметка реестра применена: строк ${proposal.parsed.rows.length}`, 'ok');
+  },
+
+  aiDismiss(which) {
+    const task = state.ai[which];
+    task.proposal = null;
+    task.sample = null;
+    task.error = null;
     renderAi(state, actions);
   },
 
-  aiReset() {
-    delete state.rules.normsLayout;
+  aiReset(which) {
+    if (which === 'registry') delete state.rules.registryMarkup;
+    else delete state.rules.normsLayout;
     persistRules();
-    const entry = state.files.find((item) => item.kind === 'norms');
+    const kind = which === 'registry' ? 'registry' : 'norms';
+    const entry = state.files.find((item) => item.kind === kind);
     if (!entry) return;
-    withOverlay('Повторный разбор нормативов…', async () => {
+    withOverlay('Повторный разбор…', async () => {
       try {
         entry.parsed = null;
         await parseEntry(entry);
@@ -557,6 +619,7 @@ async function loadRules(file) {
       registry: rules.registry || {},
       zones: rules.zones || {},
       normsLayout: rules.normsLayout || undefined,
+      registryMarkup: rules.registryMarkup || undefined,
     };
     persistRules();
     if (state.template && state.norms && state.registry) buildMappings();
@@ -616,6 +679,7 @@ function bind() {
   endpointInput.value = state.ai.endpoint;
   $('#ai-save').addEventListener('click', () => actions.aiSaveEndpoint(endpointInput.value.trim()));
   $('#ai-run').addEventListener('click', () => actions.aiRun());
+  $('#ai-run-registry').addEventListener('click', () => actions.aiRunRegistry());
 
   $('#download-rules').addEventListener('click', downloadRules);
   $('#rules-input').addEventListener('change', (event) => {

@@ -20,7 +20,7 @@ const LIMITS = {
 
 const MODEL = 'claude-haiku-4-5-20251001';
 
-const SYSTEM = `Ты размечаешь таблицы из региональных приказов об утверждении нормативов
+const NORMS_SYSTEM = `Ты размечаешь таблицы из региональных приказов об утверждении нормативов
 накопления твёрдых коммунальных отходов (ТКО).
 
 Тебе дают несколько таблиц из одного документа: подпись, первые строки и номера столбцов.
@@ -48,7 +48,7 @@ const SYSTEM = `Ты размечаешь таблицы из региональ
 
 Отвечай только вызовом инструмента.`;
 
-const TOOL = {
+const NORMS_TOOL = {
   name: 'razmetka_normativov',
   description: 'Разметка таблицы нормативов накопления ТКО',
   input_schema: {
@@ -79,6 +79,57 @@ const TOOL = {
     },
     required: ['tables', 'confidence', 'reason'],
   },
+};
+
+const REGISTRY_SYSTEM = `Ты размечаешь выгрузку реестра источников образования отходов (ИОО) —
+таблицу Excel, где каждая строка описывает один источник образования ТКО.
+
+Тебе дают листы книги: название листа и первые строки каждого.
+Нужно указать лист с данными, строку заголовка и роли столбцов.
+
+Роли столбцов:
+- category — наименование категории потребителя («Индивидуальные жилые дома», «Гостиницы»);
+- units — количество расчётных единиц источника: число проживающих, квадратные метры,
+  места. Столбца может не быть: тогда укажи -1, не подставляй вместо него другой
+  числовой столбец;
+- zone — зона деятельности регионального оператора;
+- municipality — муниципальное образование, городской или муниципальный округ, район;
+- unitName — единица измерения расчётных единиц, если она вынесена отдельным столбцом.
+
+Правила:
+- Нумерация строк и столбцов начинается с нуля и совпадает с присланной.
+- headerRow — номер строки с названиями столбцов, данные идут после неё.
+- Роль, которой в таблице нет, отмечай -1. Обязателен только category.
+- Не путай количество расчётных единиц с порядковым номером строки или с кодом объекта.
+- Если подходящего листа нет, укажи sheet -1 и объясни причину в reason.
+- confidence — насколько ты уверен; reason — одно-два предложения по-русски.
+
+Отвечай только вызовом инструмента.`;
+
+const REGISTRY_TOOL = {
+  name: 'razmetka_reestra',
+  description: 'Разметка выгрузки реестра ИОО',
+  input_schema: {
+    type: 'object',
+    properties: {
+      sheet: { type: 'integer', description: 'Номер листа с данными, -1 если подходящего нет' },
+      headerRow: { type: 'integer', description: 'Номер строки с названиями столбцов' },
+      category: { type: 'integer', description: 'Столбец категории потребителя' },
+      units: { type: 'integer', description: 'Столбец количества расчётных единиц, -1 если отсутствует' },
+      zone: { type: 'integer', description: 'Столбец зоны деятельности, -1 если отсутствует' },
+      municipality: { type: 'integer', description: 'Столбец муниципального образования, -1 если отсутствует' },
+      unitName: { type: 'integer', description: 'Столбец единицы измерения, -1 если отсутствует' },
+      confidence: { type: 'number' },
+      reason: { type: 'string' },
+    },
+    required: ['sheet', 'headerRow', 'category', 'units', 'zone', 'municipality', 'unitName',
+      'confidence', 'reason'],
+  },
+};
+
+const TASKS = {
+  'norms-markup': { system: NORMS_SYSTEM, tool: NORMS_TOOL, describe: describeTables },
+  'registry-markup': { system: REGISTRY_SYSTEM, tool: REGISTRY_TOOL, describe: describeSheets },
 };
 
 function corsHeaders(origin) {
@@ -113,10 +164,21 @@ function trimSample(tables) {
   });
 }
 
-function describe(tables) {
+function describeTables(tables) {
   return tables.map((table) => {
     const lines = [`Таблица ${table.index}${table.title ? ` — подпись: «${table.title}»` : ''}`];
     table.rows.forEach((row, rowIndex) => {
+      const cells = row.map((cell, colIndex) => `[${colIndex}] ${cell || '—'}`).join(' | ');
+      lines.push(`  строка ${rowIndex}: ${cells}`);
+    });
+    return lines.join('\n');
+  }).join('\n\n');
+}
+
+function describeSheets(sheets) {
+  return sheets.map((sheet) => {
+    const lines = [`Лист ${sheet.index}${sheet.title ? ` — название: «${sheet.title}»` : ''}`];
+    sheet.rows.forEach((row, rowIndex) => {
       const cells = row.map((cell, colIndex) => `[${colIndex}] ${cell || '—'}`).join(' | ');
       lines.push(`  строка ${rowIndex}: ${cells}`);
     });
@@ -160,9 +222,8 @@ export default {
     } catch {
       return json({ error: 'Не удалось разобрать запрос' }, 400, allowed);
     }
-    if (payload.task !== 'norms-markup') {
-      return json({ error: 'Неизвестная задача' }, 400, allowed);
-    }
+    const task = TASKS[payload.task];
+    if (!task) return json({ error: 'Неизвестная задача' }, 400, allowed);
 
     let tables;
     try {
@@ -182,10 +243,10 @@ export default {
       body: JSON.stringify({
         model: MODEL,
         max_tokens: 1024,
-        system: SYSTEM,
-        tools: [TOOL],
-        tool_choice: { type: 'tool', name: TOOL.name },
-        messages: [{ role: 'user', content: describe(tables) }],
+        system: task.system,
+        tools: [task.tool],
+        tool_choice: { type: 'tool', name: task.tool.name },
+        messages: [{ role: 'user', content: task.describe(tables) }],
       }),
     });
 

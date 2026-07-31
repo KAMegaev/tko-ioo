@@ -1,11 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import './helpers/env.js';
-import { normsGrid } from './helpers/fixtures.js';
+import { libs } from './helpers/env.js';
+import { normsGrid, registryWorkbook } from './helpers/fixtures.js';
 
 import { extractFromGrid, applyLayouts } from '../js/parse/norms.js';
 import { buildSample, describeSample, validateMarkup, compare } from '../js/ai/norms-markup.js';
 import { DEFAULT_ENDPOINT, validateEndpoint, isCustomEndpoint } from '../js/ai/client.js';
+import { validateMarkup as validateRegistryMarkup } from '../js/ai/registry-markup.js';
+import {
+  buildRegistrySample, parseRegistryWorkbook, aggregateRegistry,
+} from '../js/parse/registry.js';
+
+const { XLSX } = libs;
 
 const HOUSING_ROWS = [
   { name: 'Жилые помещения в многоквартирных домах', unit: 'на 1 человека', volume: '1,8555', mass: '219,34' },
@@ -181,4 +187,51 @@ test('применение разметки не изменяет исходны
   assert.equal(result.entries.length, 3);
   assert.equal(result.source, 'разметка');
   assert.equal(result.skipped.length, 2);
+});
+
+test('разметка реестра проверяется повторным разбором файла', () => {
+  const book = registryWorkbook(
+    [{ category: 'Гостиницы', units: 120, zone: 'Север' }],
+    ['Категория потребителя', 'Количество расчетных единиц', 'Зона деятельности'],
+  );
+  const sample = buildRegistrySample(book, XLSX);
+  const answer = (extra) => ({
+    sheet: 0, headerRow: 0, category: 0, units: 1, zone: 2, municipality: -1, unitName: -1,
+    confidence: 0.9, reason: 'проверка', ...extra,
+  });
+
+  const ok = validateRegistryMarkup(book, sample, answer(), 'Реестр.xlsx', XLSX);
+  assert.ok(ok.ok, ok.problems.join('; '));
+  assert.equal(ok.summary.rows, 1);
+  assert.equal(ok.summary.hasUnits, true);
+
+  // Категория и количество единиц перепутаны местами.
+  const swapped = validateRegistryMarkup(book, sample, answer({ category: 1, units: 0 }), 'Р.xlsx', XLSX);
+  assert.equal(swapped.ok, false);
+  assert.match(swapped.problems.join(' '), /числа|положительного/);
+
+  const missing = validateRegistryMarkup(book, sample, answer({ zone: 9 }), 'Р.xlsx', XLSX);
+  assert.equal(missing.ok, false);
+  assert.match(missing.problems.join(' '), /Столбца № 9/);
+
+  const twice = validateRegistryMarkup(book, sample, answer({ zone: 0 }), 'Р.xlsx', XLSX);
+  assert.equal(twice.ok, false);
+  assert.match(twice.problems.join(' '), /назначен и как/);
+
+  const none = validateRegistryMarkup(book, sample, answer({ sheet: -1, reason: 'Нет данных' }), 'Р.xlsx', XLSX);
+  assert.equal(none.ok, false);
+  assert.deepEqual(none.problems, ['Нет данных']);
+});
+
+test('выгрузка без количества расчётных единиц читается, но помечается', () => {
+  const book = registryWorkbook(
+    [{ category: 'Гостиницы', units: null, zone: 'Север' }],
+    ['Муниципальное образование', 'Категория потребителя', 'Зона деятельности'],
+  );
+  const parsed = parseRegistryWorkbook(book, 'Реестр.xlsx', XLSX);
+  assert.equal(parsed.hasUnits, false, 'столбца с количеством единиц нет');
+  const aggregate = aggregateRegistry([parsed]);
+  assert.equal(aggregate.hasUnits, false);
+  assert.equal(aggregate.rowsWithoutUnits, aggregate.totalRows);
+  assert.ok(aggregate.totalRows > 0);
 });
