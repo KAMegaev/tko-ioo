@@ -3,6 +3,7 @@
 
 import { el, clear, num } from './dom.js';
 import { describeSample } from '../ai/norms-markup.js';
+import { isCustomEndpoint } from '../ai/client.js';
 
 const BASIS_TEXT = {
   person: 'на 1 человека',
@@ -28,6 +29,10 @@ export function renderAi(state, actions) {
   runButton.disabled = !state.norms || !state.ai.endpoint || state.ai.status === 'running';
 
   if (!state.norms) return;
+
+  if (isCustomEndpoint(state.ai.endpoint)) {
+    result.append(el('p.hint', {}, `Используется свой прокси: ${state.ai.endpoint}`));
+  }
 
   if (state.norms.source && state.norms.source !== 'эвристика') {
     result.append(el('div.issue.info', {}, [

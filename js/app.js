@@ -15,7 +15,7 @@ import { el, $, clear, toast, withOverlay, download } from './ui/dom.js';
 import { renderNormsMapping } from './ui/mapping-view.js';
 import { renderFiles, renderZones, renderRegistryMapping, renderResults, renderCheck } from './ui/views.js';
 import { renderAi } from './ui/ai-view.js';
-import { getEndpoint, setEndpoint, validateEndpoint, requestNormsMarkup } from './ai/client.js';
+import { getEndpoint, setEndpoint, validateEndpoint, requestNormsMarkup, isCustomEndpoint } from './ai/client.js';
 import { buildSample, validateMarkup, compare } from './ai/norms-markup.js';
 
 const RULES_STORAGE_KEY = 'tko-ioo.rules.v1';
@@ -368,9 +368,10 @@ const actions = {
       toast(problem, 'error');
       return;
     }
-    state.ai.endpoint = url;
     setEndpoint(url);
-    toast(url ? 'Адрес прокси сохранён' : 'Адрес прокси удалён', 'ok');
+    state.ai.endpoint = getEndpoint();
+    document.getElementById('ai-endpoint').value = state.ai.endpoint;
+    toast(url ? 'Адрес прокси сохранён' : 'Возвращён адрес, встроенный в программу', 'ok');
     renderAi(state, actions);
   },
 

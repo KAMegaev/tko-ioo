@@ -3,13 +3,24 @@
 const TIMEOUT = 40000;
 const ENDPOINT_KEY = 'tko-ioo.ai-endpoint.v1';
 
-/** Сохранённый адрес прокси. */
+/**
+ * Прокси, развёрнутый для этого приложения. Помощник работает сразу,
+ * без настройки; поле в интерфейсе нужно лишь для замены на свой прокси.
+ */
+export const DEFAULT_ENDPOINT = 'https://tko-ioo-ai.kamegaev.workers.dev';
+
+/** Действующий адрес прокси: заданный пользователем либо встроенный. */
 export function getEndpoint() {
   try {
-    return localStorage.getItem(ENDPOINT_KEY) || '';
+    return localStorage.getItem(ENDPOINT_KEY) || DEFAULT_ENDPOINT;
   } catch {
-    return '';
+    return DEFAULT_ENDPOINT;
   }
+}
+
+/** Задан ли адрес, отличный от встроенного. */
+export function isCustomEndpoint(url) {
+  return Boolean(url) && url !== DEFAULT_ENDPOINT;
 }
 
 export function setEndpoint(url) {

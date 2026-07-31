@@ -57,15 +57,26 @@
         могут не найти таблицу нормативов. Тогда разметку — какая таблица, где
         наименования, где масса и объём — подскажет языковая модель. Числа она не
         видит и не считает: указывает только, где они лежат, а её ответ проверяется
-        по вашему файлу. Помощник необязателен, без него работают встроенные правила.
+        по вашему файлу. Настраивать ничего не нужно; если помощник недоступен,
+        работают встроенные правила.
       </p>
       <div class="toolbar">
-        <label>Адрес прокси:
-          <input type="url" id="ai-endpoint" size="44"
-                 placeholder="https://tko-ioo-ai.<поддомен>.workers.dev">
-        </label>
-        <button type="button" class="button small" id="ai-save">Сохранить</button>
         <button type="button" class="button small" id="ai-run" disabled>Разобрать помощником</button>
+        <span class="spacer"></span>
+        <details class="endpoint-settings">
+          <summary>Свой прокси</summary>
+          <div class="toolbar">
+            <label>Адрес:
+              <input type="url" id="ai-endpoint" size="42"
+                     placeholder="https://tko-ioo-ai.&lt;поддомен&gt;.workers.dev">
+            </label>
+            <button type="button" class="button small" id="ai-save">Сохранить</button>
+          </div>
+          <p class="hint">
+            Пустое поле возвращает адрес, встроенный в программу. Свой прокси
+            разворачивается по инструкции в <code>worker/README.md</code>.
+          </p>
+        </details>
       </div>
       <div id="ai-result"></div>
     </div>

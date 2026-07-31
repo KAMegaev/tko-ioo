@@ -5,6 +5,7 @@ import { normsGrid } from './helpers/fixtures.js';
 
 import { extractFromGrid, applyLayouts } from '../js/parse/norms.js';
 import { buildSample, describeSample, validateMarkup, compare } from '../js/ai/norms-markup.js';
+import { DEFAULT_ENDPOINT, validateEndpoint, isCustomEndpoint } from '../js/ai/client.js';
 
 const HOUSING_ROWS = [
   { name: 'Жилые помещения в многоквартирных домах', unit: 'на 1 человека', volume: '1,8555', mass: '219,34' },
@@ -49,6 +50,15 @@ const OTHER_MARKUP = {
 };
 
 const answer = (tables, extra = {}) => ({ tables, confidence: 0.9, reason: 'проверка', ...extra });
+
+test('встроенный адрес прокси пригоден к использованию', () => {
+  // Опечатка во встроенном адресе оставила бы помощника нерабочим у всех сразу.
+  assert.equal(validateEndpoint(DEFAULT_ENDPOINT), null);
+  assert.match(DEFAULT_ENDPOINT, /^https:\/\/[a-z0-9.-]+\.workers\.dev$/);
+  assert.equal(isCustomEndpoint(DEFAULT_ENDPOINT), false);
+  assert.equal(isCustomEndpoint('https://иной.example'), true);
+  assert.equal(isCustomEndpoint(''), false);
+});
 
 test('в образец попадают только шапки и первые строки, без данных реестра', () => {
   const sample = buildSample(normsFile());

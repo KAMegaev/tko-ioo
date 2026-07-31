@@ -298,3 +298,7 @@ pre.sample {
 }
 .ai-block li.loss { color: var(--error); }
 .ai-block ul.detail ul { margin: 2px 0 4px; padding-left: 18px; color: var(--muted); }
+.endpoint-settings { font-size: 13px; }
+.endpoint-settings summary { cursor: pointer; color: var(--muted); }
+.endpoint-settings .toolbar { margin: 8px 0 0; }
+.endpoint-settings .hint { margin: 0; }
