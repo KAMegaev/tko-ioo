@@ -18,6 +18,19 @@ wrangler secret put ANTHROPIC_API_KEY   # ключ вводится в конс�
 wrangler deploy
 ```
 
+На `wrangler secret put` до первого развёртывания появится вопрос:
+
+> There doesn't seem to be a Worker called "tko-ioo-ai".
+> Do you want to create a new Worker with that name and add secrets to it?
+
+Отвечайте **Yes**: воркера с таким именем ещё нет, и wrangler создаёт заготовку,
+чтобы положить в неё ключ. Следующая команда `wrangler deploy` зальёт в эту
+заготовку код; ранее заданный секрет при этом сохраняется.
+
+Если `wrangler deploy` откажется принимать блок `[[unsafe.bindings]]` из
+`wrangler.toml` — удалите этот блок и повторите команду. Он задаёт ограничение
+частоты обращений, и код к его отсутствию готов.
+
 `wrangler deploy` напечатает адрес вида
 `https://tko-ioo-ai.<ваш-поддомен>.workers.dev`. Его нужно указать в приложении:
 шаг 1 → «Помощник разметки» → поле адреса.
