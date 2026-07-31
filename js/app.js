@@ -1,6 +1,6 @@
 // Состояние приложения и связывание этапов обработки.
 
-import { parseNorms } from './parse/norms.js';
+import { parseNorms, applyLayouts } from './parse/norms.js';
 import { parseRegistryWorkbook, aggregateRegistry } from './parse/registry.js';
 import { parseTemplate } from './parse/template.js';
 import {
@@ -14,6 +14,9 @@ import { normalize } from './lib/text.js';
 import { el, $, clear, toast, withOverlay, download } from './ui/dom.js';
 import { renderNormsMapping } from './ui/mapping-view.js';
 import { renderFiles, renderZones, renderRegistryMapping, renderResults, renderCheck } from './ui/views.js';
+import { renderAi } from './ui/ai-view.js';
+import { getEndpoint, setEndpoint, validateEndpoint, requestNormsMarkup } from './ai/client.js';
+import { buildSample, validateMarkup, compare } from './ai/norms-markup.js';
 
 const RULES_STORAGE_KEY = 'tko-ioo.rules.v1';
 
@@ -35,6 +38,7 @@ const state = {
   verification: null,
   // Правила, заданные пользователем: переживают повторную загрузку файлов.
   rules: { norms: {}, registry: {}, zones: {} },
+  ai: { endpoint: '', status: 'idle', proposal: null, error: null, sample: null },
   step: 'files',
 };
 
@@ -84,10 +88,13 @@ async function parseEntry(entry) {
     entry.info = `лист «${template.sheetName}», строк данных: ${template.rows.length}, ` +
       `столбцы: ${Object.keys(template.columns).length}`;
   } else if (entry.kind === 'norms') {
-    const norms = await parseNorms({ name: entry.name }, entry.buffer.slice(0), libs);
+    const norms = applySavedLayout(await parseNorms({ name: entry.name }, entry.buffer.slice(0), libs));
     entry.parsed = norms;
-    entry.info = `нормативов: ${norms.entries.length}, таблиц: ${norms.tables.length}` +
-      (norms.skipped.length ? `, пропущено таблиц: ${norms.skipped.length}` : '');
+    entry.info = norms.entries.length
+      ? `нормативов: ${norms.entries.length}, таблиц: ${norms.tables.length}`
+        + (norms.skipped.length ? `, пропущено таблиц: ${norms.skipped.length}` : '')
+        + (norms.source !== 'эвристика' ? `, разметка: ${norms.source}` : '')
+      : `таблиц в файле: ${norms.rawTables.length}, нормативы не распознаны`;
   } else if (entry.kind === 'registry') {
     const registry = parseRegistryWorkbook(entry.buffer.slice(0), entry.name, libs.XLSX);
     entry.parsed = registry;
@@ -126,6 +133,22 @@ async function addFiles(fileList) {
     collectParsed();
   });
   refreshAll();
+}
+
+/**
+ * Применяет разметку, сохранённую при прошлой обработке.
+ * Файл мог смениться, поэтому результат принимается только если он осмыслен.
+ */
+function applySavedLayout(norms) {
+  const saved = state.rules.normsLayout;
+  if (!saved) return norms;
+  try {
+    const result = applyLayouts(norms, { ...saved, source: `${saved.source || 'разметка'} (сохранена)` });
+    if (result.entries.length < 2) return norms;
+    return result;
+  } catch {
+    return norms;
+  }
 }
 
 /** Пересобирает разобранные данные из списка файлов. */
@@ -243,6 +266,7 @@ function restoreRules() {
         norms: parsed.norms || {},
         registry: parsed.registry || {},
         zones: parsed.zones || {},
+        normsLayout: parsed.normsLayout || undefined,
       };
     }
   } catch {
@@ -338,6 +362,78 @@ const actions = {
     refreshData();
   },
 
+  aiSaveEndpoint(url) {
+    const problem = url ? validateEndpoint(url) : null;
+    if (problem) {
+      toast(problem, 'error');
+      return;
+    }
+    state.ai.endpoint = url;
+    setEndpoint(url);
+    toast(url ? 'Адрес прокси сохранён' : 'Адрес прокси удалён', 'ok');
+    renderAi(state, actions);
+  },
+
+  async aiRun() {
+    if (!state.norms || !state.ai.endpoint) return;
+    state.ai = { ...state.ai, status: 'running', error: null, proposal: null, sample: null };
+    renderAi(state, actions);
+    try {
+      const sample = buildSample(state.norms);
+      state.ai.sample = sample;
+      const answer = await requestNormsMarkup(state.ai.endpoint, sample);
+      const checked = validateMarkup(state.norms, answer.result);
+      if (checked.ok) checked.compare = compare(state.norms, checked.preview);
+      state.ai.proposal = checked;
+      state.ai.status = 'idle';
+      if (!checked.ok) toast('Предложение помощника не прошло проверку по файлу', 'error');
+    } catch (error) {
+      state.ai.status = 'idle';
+      state.ai.error = error.message;
+      toast(error.message, 'error');
+    }
+    renderAi(state, actions);
+  },
+
+  aiApply() {
+    const proposal = state.ai.proposal;
+    if (!proposal || !proposal.ok) return;
+    const entry = state.files.find((item) => item.kind === 'norms' && item.parsed);
+    if (entry) {
+      entry.parsed = proposal.preview;
+      entry.info = `нормативов: ${proposal.preview.entries.length}, `
+        + `таблиц: ${proposal.preview.tables.length}, разметка: ${proposal.preview.source}`;
+    }
+    state.rules.normsLayout = proposal.markup;
+    persistRules();
+    state.ai.proposal = null;
+    collectParsed();
+    refreshAll();
+    toast(`Разметка применена: нормативов ${proposal.preview.entries.length}`, 'ok');
+  },
+
+  aiDismiss() {
+    state.ai.proposal = null;
+    state.ai.sample = null;
+    renderAi(state, actions);
+  },
+
+  aiReset() {
+    delete state.rules.normsLayout;
+    persistRules();
+    const entry = state.files.find((item) => item.kind === 'norms');
+    if (!entry) return;
+    withOverlay('Повторный разбор нормативов…', async () => {
+      try {
+        entry.parsed = null;
+        await parseEntry(entry);
+      } catch (error) {
+        entry.error = error.message;
+      }
+      collectParsed();
+    }).then(() => refreshAll());
+  },
+
   setZoneRule(key, templateKey) {
     const mapping = state.zoneMapping.get(key);
     if (!mapping) return;
@@ -366,6 +462,7 @@ function refreshData() {
 
 function refreshAll() {
   renderFiles(state, actions);
+  renderAi(state, actions);
   refreshData();
 }
 
@@ -458,6 +555,7 @@ async function loadRules(file) {
       norms: rules.norms || {},
       registry: rules.registry || {},
       zones: rules.zones || {},
+      normsLayout: rules.normsLayout || undefined,
     };
     persistRules();
     if (state.template && state.norms && state.registry) buildMappings();
@@ -513,6 +611,11 @@ function bind() {
   $('#download-report').addEventListener('click', () => {
     downloadReport().catch((error) => toast(error.message, 'error'));
   });
+  const endpointInput = $('#ai-endpoint');
+  endpointInput.value = state.ai.endpoint;
+  $('#ai-save').addEventListener('click', () => actions.aiSaveEndpoint(endpointInput.value.trim()));
+  $('#ai-run').addEventListener('click', () => actions.aiRun());
+
   $('#download-rules').addEventListener('click', downloadRules);
   $('#rules-input').addEventListener('change', (event) => {
     const [file] = event.target.files;
@@ -538,6 +641,7 @@ function checkLibraries() {
 }
 
 restoreRules();
+state.ai.endpoint = getEndpoint();
 if (checkLibraries()) {
   bind();
   updateSteps();

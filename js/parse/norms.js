@@ -5,46 +5,60 @@ import { unitBasis, massFactor, volumeFactor, isMassHeader, isVolumeHeader } fro
 
 const META_ROW = /список изменяющих|действие изменений|в ред\.|утративш/i;
 
-/**
- * Извлекает нормативы из прямоугольной сетки текстовых ячеек.
- * @param {string[][]} grid строки таблицы
- * @param {{title?: string, source?: string}} context подпись таблицы
- * @returns {{entries: Array, headerInfo: object}|null}
- */
-export function extractFromGrid(grid, context = {}) {
-  const rows = grid.filter((row) => row.some((cell) => String(cell || '').trim()));
-  if (rows.length < 2) return null;
+/** Непустые строки таблицы — с ними работают и разметка, и извлечение. */
+export function significantRows(grid) {
+  return grid.filter((row) => row.some((cell) => String(cell || '').trim()));
+}
 
-  const firstDataRow = rows.findIndex(
-    (row, index) => index > 0 && row.some((cell) => parseNumber(cell) !== null),
-  );
-  if (firstDataRow < 1) return null;
-
-  const width = Math.max(...rows.map((row) => row.length));
-  const headerRows = rows.slice(0, firstDataRow);
+/** Склеивает многоярусную шапку в один заголовок на столбец. */
+export function headerTexts(rows, headerRowCount) {
+  const width = Math.max(0, ...rows.map((row) => row.length));
   const headers = [];
   for (let col = 0; col < width; col += 1) {
     const parts = [];
-    for (const row of headerRows) {
+    for (const row of rows.slice(0, headerRowCount)) {
       const text = String(row[col] || '').trim();
       if (text && !parts.includes(text)) parts.push(text);
     }
     headers.push(parts.join(' '));
   }
+  return headers;
+}
 
-  const nameCol = headers.findIndex((h) => /наименование|категор/i.test(h));
-  const unitCol = headers.findIndex((h) => /расчетн[а-я]*\s+единиц|единиц[а-я]*\s+измерени/i.test(normalize(h)));
-  const massCol = headers.findIndex((h, i) => i !== nameCol && isMassHeader(h));
-  const volumeCol = headers.findIndex((h, i) => i !== nameCol && isVolumeHeader(h));
-  if (nameCol < 0 || (massCol < 0 && volumeCol < 0)) return null;
+/**
+ * Извлекает нормативы по заданной разметке столбцов.
+ * Разметку определяет либо эвристика, либо помощник — способ на результат не влияет.
+ *
+ * @param {string[][]} grid строки таблицы
+ * @param {object} layout {headerRowCount, nameColumn, massColumn, volumeColumn, unitColumn,
+ *                         massFactor, volumeFactor, basis}
+ * @param {{title?: string}} context подпись таблицы
+ */
+export function extractWithLayout(grid, layout, context = {}) {
+  const rows = significantRows(grid);
+  const {
+    headerRowCount, nameColumn, unitColumn = -1,
+    massColumn = -1, volumeColumn = -1,
+  } = layout;
+  if (!(headerRowCount >= 0) || !(nameColumn >= 0)) return null;
+  if (massColumn < 0 && volumeColumn < 0) return null;
+  if (rows.length <= headerRowCount) return null;
 
-  const toMass = massCol >= 0 ? massFactor(headers[massCol]) ?? 1 : null;
-  const toVolume = volumeCol >= 0 ? volumeFactor(headers[volumeCol]) ?? 1 : null;
-  const headerBasis =
-    unitBasis(headers[massCol] || '') !== 'other' ? unitBasis(headers[massCol] || '') : null;
+  const headers = headerTexts(rows, headerRowCount);
+  const toMass = massColumn >= 0 ? layout.massFactor ?? massFactor(headers[massColumn]) ?? 1 : null;
+  const toVolume =
+    volumeColumn >= 0 ? layout.volumeFactor ?? volumeFactor(headers[volumeColumn]) ?? 1 : null;
   const fallbackBasis =
-    headerBasis || unitBasis(headers[volumeCol] || '') || unitBasis(context.title || '');
+    layout.basis
+    || (unitBasis(headers[massColumn] || '') !== 'other' ? unitBasis(headers[massColumn] || '') : null)
+    || unitBasis(headers[volumeColumn] || '')
+    || unitBasis(context.title || '');
 
+  const nameCol = nameColumn;
+  const unitCol = unitColumn;
+  const massCol = massColumn;
+  const volumeCol = volumeColumn;
+  const firstDataRow = headerRowCount;
   const entries = [];
   for (const row of rows.slice(firstDataRow)) {
     const name = String(row[nameCol] || '').trim().replace(/\s+/g, ' ');
@@ -76,8 +90,51 @@ export function extractFromGrid(grid, context = {}) {
       volumeHeader: volumeCol >= 0 ? headers[volumeCol] : null,
       massFactor: toMass,
       volumeFactor: toVolume,
+      layout: {
+        headerRowCount: firstDataRow,
+        nameColumn: nameCol,
+        unitColumn: unitCol,
+        massColumn: massCol,
+        volumeColumn: volumeCol,
+      },
     },
   };
+}
+
+/**
+ * Подбирает разметку таблицы по её шапке.
+ * @returns {object|null} разметка либо null, если таблица не похожа на нормативы
+ */
+export function detectLayout(grid) {
+  const rows = significantRows(grid);
+  if (rows.length < 2) return null;
+
+  // Шапка кончается там, где встретилась первая строка с числом.
+  const firstDataRow = rows.findIndex(
+    (row, index) => index > 0 && row.some((cell) => parseNumber(cell) !== null),
+  );
+  if (firstDataRow < 1) return null;
+
+  const headers = headerTexts(rows, firstDataRow);
+  const nameColumn = headers.findIndex((h) => /наименование|категор/i.test(h));
+  const unitColumn = headers.findIndex(
+    (h) => /расчетн[а-я]*\s+единиц|единиц[а-я]*\s+измерени/i.test(normalize(h)),
+  );
+  const massColumn = headers.findIndex((h, i) => i !== nameColumn && isMassHeader(h));
+  const volumeColumn = headers.findIndex((h, i) => i !== nameColumn && isVolumeHeader(h));
+  if (nameColumn < 0 || (massColumn < 0 && volumeColumn < 0)) return null;
+
+  return { headerRowCount: firstDataRow, nameColumn, unitColumn, massColumn, volumeColumn };
+}
+
+/**
+ * Извлекает нормативы из таблицы, определяя разметку самостоятельно.
+ * @returns {{entries: Array, headerInfo: object}|null}
+ */
+export function extractFromGrid(grid, context = {}) {
+  const layout = detectLayout(grid);
+  if (!layout) return null;
+  return extractWithLayout(grid, layout, context);
 }
 
 const W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
@@ -191,10 +248,51 @@ function collect(tables, fileName) {
       entries.push({ ...entry, id: `n${entries.length}`, file: fileName });
     }
   });
-  if (!entries.length) {
-    throw new Error('В файле нормативов не найдено ни одной таблицы с категориями и значениями');
+  // Таблицы сохраняются целиком: если разметка не удалась, её можно задать
+  // заново — вручную или с помощью помощника — не перечитывая файл.
+  const rawTables = tables.map((table, index) => ({
+    index, title: table.title, grid: table.grid,
+  }));
+  return { fileName, entries, tables: parsedTables, skipped, rawTables, source: 'эвристика' };
+}
+
+/**
+ * Пересобирает нормативы по явно заданной разметке.
+ *
+ * Таблиц может быть несколько: в приказах жильё («на 1 человека») и прочие
+ * категории («на 1 кв. м») обычно разнесены по разным приложениям.
+ *
+ * @param {object} norms результат parseNorms
+ * @param {{tables: Array<{tableIndex: number, layout: object}>, source?: string}} markup
+ * @returns {object} новый результат разбора (исходный не изменяется)
+ */
+export function applyLayouts(norms, markup) {
+  const list = markup && Array.isArray(markup.tables) ? markup.tables : [];
+  if (!list.length) throw new Error('Разметка не содержит ни одной таблицы');
+
+  const entries = [];
+  const parsedTables = [];
+  const used = new Set();
+  for (const item of list) {
+    const table = norms.rawTables.find((raw) => raw.index === item.tableIndex);
+    if (!table) throw new Error(`В файле нет таблицы № ${item.tableIndex}`);
+    const result = extractWithLayout(table.grid, item.layout, { title: table.title });
+    if (!result) throw new Error(`По разметке таблицы № ${item.tableIndex} не прочитан ни один норматив`);
+    used.add(table.index);
+    parsedTables.push({ index: table.index, ...result.headerInfo, count: result.entries.length });
+    for (const entry of result.entries) {
+      entries.push({ ...entry, id: `n${entries.length}`, file: norms.fileName });
+    }
   }
-  return { fileName, entries, tables: parsedTables, skipped };
+
+  return {
+    ...norms,
+    entries,
+    tables: parsedTables,
+    skipped: norms.rawTables.filter((item) => !used.has(item.index))
+      .map((item) => ({ index: item.index, title: item.title, rows: item.grid.length })),
+    source: markup.source || 'разметка',
+  };
 }
 
 /** Точка входа: определяет формат по расширению. */

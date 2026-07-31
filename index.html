@@ -49,6 +49,26 @@
 
     <div id="file-list" class="file-list"></div>
     <div id="file-summary"></div>
+
+    <div id="ai-block" class="ai-block" hidden>
+      <h3>Помощник разметки нормативов</h3>
+      <p class="hint">
+        Приказы разных регионов свёрстаны по-разному, и встроенные правила разбора
+        могут не найти таблицу нормативов. Тогда разметку — какая таблица, где
+        наименования, где масса и объём — подскажет языковая модель. Числа она не
+        видит и не считает: указывает только, где они лежат, а её ответ проверяется
+        по вашему файлу. Помощник необязателен, без него работают встроенные правила.
+      </p>
+      <div class="toolbar">
+        <label>Адрес прокси:
+          <input type="url" id="ai-endpoint" size="44"
+                 placeholder="https://tko-ioo-ai.<поддомен>.workers.dev">
+        </label>
+        <button type="button" class="button small" id="ai-save">Сохранить</button>
+        <button type="button" class="button small" id="ai-run" disabled>Разобрать помощником</button>
+      </div>
+      <div id="ai-result"></div>
+    </div>
   </section>
 
   <section class="panel" id="panel-norms" data-panel="norms" hidden>
