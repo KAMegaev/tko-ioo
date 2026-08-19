@@ -191,6 +191,17 @@ const NUMBERING_HEADER = /^\s*(n|№)\s*(п\/п)?\s*$/i;
  * где значения по массе и по объёму.
  * @returns {object|null} разметка либо null, если таблица не похожа на нормативы
  */
+/**
+ * Столбец с номером по порядку: «1», «2.10», «3.7.». Числом норматива такое
+ * не бывает — в нормативах десятичная запятая, а не точка.
+ */
+function isOrdinalColumn(rows, firstDataRow, col) {
+  const cells = rows.slice(firstDataRow)
+    .map((row) => String(row[col] ?? '').trim()).filter(Boolean);
+  if (!cells.length) return false;
+  return cells.filter((cell) => /^\d{1,3}(\.\d{1,3})*\.?$/.test(cell)).length >= cells.length * 0.7;
+}
+
 export function detectLayout(grid) {
   const rows = significantRows(grid);
   if (rows.length < 2) return null;
@@ -215,8 +226,13 @@ export function detectLayout(grid) {
   }
   if (nameColumn < 0) return null;
 
+  // Столбец с номером по порядку под расчётную единицу не подходит, даже если
+  // слова «расчетная единица» затесались в его шапку: в сканах заголовок
+  // таблицы размазывается по всем столбцам.
   const unitColumn = headers.findIndex(
-    (header) => /расчетн[а-я]*\s+единиц|единиц[а-я]*\s+измерени/i.test(normalize(header)),
+    (header, col) => col !== nameColumn
+      && /расчетн[а-я]*\s+единиц|единиц[а-я]*\s+измерени/i.test(normalize(header))
+      && !isOrdinalColumn(rows, firstDataRow, col),
   );
 
   // 1. Размерность указана в самих ячейках.
@@ -253,6 +269,20 @@ export function detectLayout(grid) {
     volumeColumn = headers.findIndex(
       (header, col) => col !== nameColumn && col !== massColumn && stats[col].plain > 0 && /объем|объём/i.test(header),
     );
+  }
+
+  // 4. Столбец массы найден, а объёма нет, и остался ровно один числовой
+  // столбец — значит, объём в нём. Так читаются приказы, где размерность в
+  // шапке испорчена распознаванием: «м³/год» превращается в «м / год».
+  // Обратное правило небезопасно: массу пишут и в килограммах, и в тоннах,
+  // и молча принять одно за другое — ошибка в тысячу раз.
+  if (massColumn >= 0 && volumeColumn < 0) {
+    const spare = [];
+    for (let col = 0; col < width; col += 1) {
+      if (col === nameColumn || col === unitColumn || col === massColumn) continue;
+      if (stats[col].plain > 0 && !isOrdinalColumn(rows, firstDataRow, col)) spare.push(col);
+    }
+    if (spare.length === 1) [volumeColumn] = spare;
   }
 
   if (massColumn < 0 && volumeColumn < 0) return null;

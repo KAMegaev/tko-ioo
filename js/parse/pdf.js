@@ -2,6 +2,7 @@
 // восстановление таблиц из них — в pdf-layout.js.
 
 import { tablesFromPages } from './pdf-layout.js';
+import { tablesFromScanPages } from './pdf-scan.js';
 
 const VENDOR = new URL('../../vendor/', import.meta.url);
 
@@ -69,8 +70,22 @@ export async function readPdfTables(arrayBuffer, pdfjsLib = null) {
   }
 
   if (!textItems) {
-    throw new Error('В PDF нет текстового слоя — похоже, это скан. '
+    throw new Error('В PDF нет текстового слоя — похоже, это скан без распознавания. '
       + 'Распознайте его (OCR) или возьмите приказ в .docx либо .xlsx.');
   }
-  return tablesFromPages(pages);
+  return isScanned(pages) ? tablesFromScanPages(pages) : tablesFromPages(pages);
+}
+
+/**
+ * Скан это или PDF, сделанный из Word.
+ *
+ * PDF из редактора пишет текст ячейками — в куске обычно несколько слов.
+ * Распознавание скана выдаёт слова поодиночке, и разбирать такой файл надо
+ * иначе: по расположению текста на странице, а не по порядку записи.
+ */
+export function isScanned(pages) {
+  const items = pages.flat();
+  if (!items.length) return false;
+  const multiWord = items.filter((item) => /\s/.test(item.text.trim())).length;
+  return multiWord < items.length * 0.2;
 }
