@@ -1,6 +1,7 @@
-// Разбор файла «Нормативы накопления ТКО»: .docx (приказ) или .xlsx.
+// Разбор файла «Нормативы накопления ТКО»: .docx (приказ), .xlsx или .pdf.
 
-import { normalize } from '../lib/text.js';
+import { normalize, parseNumber } from '../lib/text.js';
+import { readPdfTables } from './pdf.js';
 import {
   unitBasis, massFactor, volumeFactor, isMassHeader, isVolumeHeader, parseMeasure,
 } from '../lib/units.js';
@@ -426,10 +427,58 @@ export function applyLayouts(norms, markup) {
   };
 }
 
+const hasNumbers = (row) => row.some((cell) => parseNumber(cell) !== null);
+const isUnitHeaderRow = (row) => row
+  .filter((cell) => isMassHeader(cell) || isVolumeHeader(cell)).length >= 2;
+
+/**
+ * Делит восстановленную из PDF таблицу там, где начинается следующая.
+ *
+ * В PDF две таблицы, стоящие вплотную и одинаково разграфлённые, неотличимы
+ * от одной. Признак — повторная шапка с единицами измерения: приказы обычно
+ * разносят жильё («кг в год») и прочие категории («кг на 1 кв. метр в год»)
+ * по разным приложениям. Не разделив их, множитель массы из первой шапки
+ * применился бы ко всем строкам — а это разница в тысячу раз.
+ */
+export function splitOnRepeatedHeader(grid) {
+  const parts = [];
+  let start = 0;
+  for (let index = 1; index < grid.length; index += 1) {
+    if (!isUnitHeaderRow(grid[index])) continue;
+    // Шапка бывает многоярусной: захватываем идущие перед ней строки без чисел.
+    let from = index;
+    while (from > start + 1 && !hasNumbers(grid[from - 1])
+      && grid[from - 1].some((cell) => String(cell).trim())) from -= 1;
+    if (from <= start || !grid.slice(start, from).some(hasNumbers)) continue;
+    parts.push(grid.slice(start, from));
+    start = from;
+  }
+  parts.push(grid.slice(start));
+  return parts.filter((part) => part.length > 1);
+}
+
+/**
+ * Разбирает приказ, присланный в PDF.
+ *
+ * Таблицы в PDF нет: она восстанавливается по расположению текста на странице
+ * (см. pdf-layout.js). Дальше всё как у остальных форматов.
+ */
+export async function parseNormsPdf(arrayBuffer, fileName, pdfjsLib = null) {
+  const restored = await readPdfTables(arrayBuffer, pdfjsLib);
+  const tables = restored.flatMap((table) => splitOnRepeatedHeader(table.grid)
+    .map((grid, part) => ({ grid, title: part === 0 ? table.title : '' })));
+  if (!tables.length) {
+    throw new Error('В PDF не нашлось ни одной таблицы: текст есть, но он не разложен '
+      + 'по столбцам. Возьмите приказ в .docx или .xlsx.');
+  }
+  return collect(tables, fileName);
+}
+
 /** Точка входа: определяет формат по расширению. */
-export async function parseNorms(file, arrayBuffer, libs) {
+export async function parseNorms(file, arrayBuffer, libs = {}) {
   const name = file.name.toLowerCase();
   if (name.endsWith('.docx')) return parseNormsDocx(arrayBuffer, file.name, libs.JSZip);
+  if (name.endsWith('.pdf')) return parseNormsPdf(arrayBuffer, file.name, libs.pdfjs);
   if (/\.(xlsx|xlsm|xls|ods)$/.test(name)) return parseNormsXlsx(arrayBuffer, file.name, libs.XLSX);
   throw new Error(`Неподдерживаемый формат файла нормативов: ${file.name}`);
 }

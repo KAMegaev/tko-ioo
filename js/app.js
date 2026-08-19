@@ -67,7 +67,9 @@ function readFile(file) {
 
 /** Определяет вид файла по содержимому, с опорой на имя как на подсказку. */
 function detectKind(file, arrayBuffer) {
-  if (/\.docx$/i.test(file.name)) return 'norms';
+  // Реестр и общие сведения приходят только книгами Excel, поэтому приказ —
+  // единственное, что бывает в .docx и .pdf.
+  if (/\.(docx|pdf)$/i.test(file.name)) return 'norms';
   let headerText = '';
   try {
     const workbook = libs.XLSX.read(arrayBuffer, { type: 'array', sheetRows: 30 });
