@@ -52,10 +52,16 @@ export function verify({ results, registry, normById, normMapping, templateRows 
 
   // 2. Данные реестра, не попавшие в файл.
   for (const item of results.unassigned) {
+    const where = item.municipality ? `, МО «${item.municipality}»` : '';
+    // Замечание сведено по районам — показываем, скольких оно касается,
+    // иначе непонятно, откуда взялись такие суммы.
+    const spread = !item.municipality && item.municipalities.length > 1
+      ? ` Данные собраны по ${fmt(item.municipalities.length)} муниципальным образованиям.`
+      : '';
     issues.push(
       issue('error', 'unassigned', 'Данные реестра не попали в файл',
-        `«${item.category}» (зона «${item.zone}»): ${fmt(item.rows)} строк, ${fmt(item.units)} ед., ` +
-        `${fmt(item.sources)} источников — ${item.reason}.`,
+        `«${item.category}» (зона «${item.zone}»${where}): ${fmt(item.rows)} строк, ` +
+        `${fmt(item.units)} ед., ${fmt(item.sources)} источников — ${item.reason}.${spread}`,
         { category: item.category, zone: item.zone }),
     );
   }
@@ -191,7 +197,7 @@ export function verify({ results, registry, normById, normMapping, templateRows 
     totalMass: round(totalMass, 2),
     totalVolume: round(totalVolume, 2),
     averageDensity: totalVolume ? round(totalMass / totalVolume, 3) : null,
-    unassignedGroups: results.unassigned.length,
+    unassignedGroups: results.unassigned.reduce((sum, item) => sum + item.groups, 0),
     errors: 0,
     warnings: 0,
   };

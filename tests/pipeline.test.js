@@ -185,3 +185,59 @@ test('повторная обработка уже заполненного фа
   assert.equal(template.columns.normVolume, 13);
   assert.equal(template.rows.length, TEMPLATE_ROWS.length);
 });
+
+test('несопоставленные данные сводятся в одно замечание на зону и категорию', () => {
+  // Реестр делится в том числе по муниципальным образованиям, а форма их не
+  // различает. Без сведения одна категория дала бы замечание на каждый район,
+  // и все они выглядели бы одинаково: района в тексте замечания нет.
+  const group = (municipality, rows, units, sources) => ([
+    `з1||мо-${municipality}||иная`,
+    {
+      zoneKey: 'з1',
+      municipalityKey: `мо-${municipality}`,
+      categoryKey: 'иная',
+      zone: 'Зона №1',
+      municipality,
+      category: 'Иная категория',
+      rows,
+      units,
+      sources,
+      unitsKnown: true,
+    },
+  ]);
+  const registryGroups = new Map([
+    group('Ровенский район', 11, 492.25, 11),
+    group('Перелюбский район', 9, 783.68, 9),
+    group('Городской округ Саратов', 101, 12803.47, 101),
+  ]);
+
+  const results = buildResults({
+    templateRows: TEMPLATE_ROWS.map((row, index) => ({ ...row, index })),
+    registryGroups,
+    registryMapping: new Map([['иная', { templateKey: null }]]),
+    zoneMapping: new Map([['з1', { templateKey: 'вся территория' }]]),
+    normMapping: new Map(),
+    normById: new Map(),
+  });
+
+  assert.equal(results.unassigned.length, 1, 'одно замечание вместо трёх');
+  const [item] = results.unassigned;
+  assert.equal(item.rows, 121);
+  assert.equal(round(item.units, 2), 14079.4);
+  assert.equal(item.sources, 121);
+  assert.equal(item.groups, 3, 'счёт групп реестра сохранён');
+  assert.equal(item.municipalities.length, 3);
+
+  const verification = verify({
+    results,
+    registry: { groups: registryGroups, totalRows: 121, zeroRows: 0, categories: [], hasUnits: true },
+    normById: new Map(),
+    normMapping: new Map(),
+    templateRows: TEMPLATE_ROWS,
+  });
+  const unassigned = verification.issues.filter((one) => one.code === 'unassigned');
+  assert.equal(unassigned.length, 1);
+  assert.match(unassigned[0].detail, /собраны по 3 муниципальным образованиям/);
+  assert.equal(verification.summary.unassignedGroups, 3);
+  assert.ok(verification.checks.every((check) => check.ok), 'балансы сходятся');
+});

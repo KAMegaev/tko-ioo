@@ -171,7 +171,46 @@ export function buildResults({
     }
   }
 
-  return { rows, unassigned, duplicates, useMunicipality };
+  return { rows, unassigned: mergeUnassigned(unassigned, useMunicipality), duplicates, useMunicipality };
+}
+
+/**
+ * Сводит нераспределённые данные в одно замечание на «зона + категория».
+ *
+ * Реестр группируется в том числе по муниципальным образованиям, а форма
+ * общих сведений их обычно не различает. Без сведения одна и та же
+ * несопоставленная категория давала бы по замечанию на каждый район — и все
+ * они выглядели бы одинаково, потому что район в замечании не показан.
+ * Если же форма районы различает, они остаются признаком группировки.
+ */
+function mergeUnassigned(list, useMunicipality) {
+  const merged = new Map();
+  for (const item of list) {
+    const key = [item.zone, useMunicipality ? item.municipality : '', item.category, item.reason].join('||');
+    let entry = merged.get(key);
+    if (!entry) {
+      entry = {
+        zone: item.zone,
+        municipality: useMunicipality ? item.municipality : null,
+        category: item.category,
+        reason: item.reason,
+        rows: 0,
+        units: 0,
+        sources: 0,
+        groups: 0,
+        municipalities: new Set(),
+      };
+      merged.set(key, entry);
+    }
+    entry.rows += item.rows;
+    entry.units += item.units;
+    entry.sources += item.sources;
+    entry.groups += 1;
+    if (item.municipality) entry.municipalities.add(item.municipality);
+  }
+  return [...merged.values()]
+    .map((entry) => ({ ...entry, municipalities: [...entry.municipalities] }))
+    .sort((a, b) => b.units - a.units || b.rows - a.rows);
 }
 
 /** Значения, которые попадут в файл (с учётом округления и замены пустых на 0). */
