@@ -24,33 +24,51 @@ import {
   describeSample as describeRegistrySample, validateMarkup as validateRegistryMarkup,
 } from './ai/registry-markup.js';
 
-const RULES_STORAGE_KEY = 'tko-ioo.rules.v1';
-
 const libs = { JSZip: globalThis.JSZip, XLSX: globalThis.XLSX };
 
+/** Пустое состояние расчёта: с него начинается каждый сеанс. */
+function blankState() {
+  return {
+    files: [],
+    template: null,
+    norms: null,
+    registryFiles: [],
+    registry: null,
+    categories: [],
+    templateZones: [],
+    normById: new Map(),
+    normMapping: new Map(),
+    registryMapping: new Map(),
+    zoneMapping: new Map(),
+    results: null,
+    verification: null,
+    // Правила, заданные пользователем. Между сеансами не сохраняются: каждый
+    // расчёт начинается с чистого листа, чтобы правила от прежних файлов не
+    // перенеслись на новые. Перенести их намеренно можно файлом правил (.json).
+    rules: { norms: {}, registry: {}, zones: {} },
+  };
+}
+
+/** Пустое состояние помощника разметки. */
+const blankAi = () => ({
+  endpoint: '',
+  norms: { status: 'idle', proposal: null, error: null, sample: null },
+  registry: { status: 'idle', proposal: null, error: null, sample: null },
+});
+
 const state = {
-  files: [],
-  template: null,
-  norms: null,
-  registryFiles: [],
-  registry: null,
-  categories: [],
-  templateZones: [],
-  normById: new Map(),
-  normMapping: new Map(),
-  registryMapping: new Map(),
-  zoneMapping: new Map(),
-  results: null,
-  verification: null,
-  // Правила, заданные пользователем: переживают повторную загрузку файлов.
-  rules: { norms: {}, registry: {}, zones: {} },
-  ai: {
-    endpoint: '',
-    norms: { status: 'idle', proposal: null, error: null, sample: null },
-    registry: { status: 'idle', proposal: null, error: null, sample: null },
-  },
+  ...blankState(),
+  ai: blankAi(),
   step: 'files',
 };
+
+/** Возвращает приложение к чистому листу, сохраняя лишь адрес прокси. */
+function resetSession() {
+  const { endpoint } = state.ai;
+  Object.assign(state, blankState());
+  state.ai = { ...blankAi(), endpoint };
+  state.step = 'files';
+}
 
 let fileCounter = 0;
 
@@ -84,7 +102,11 @@ function detectKind(file, arrayBuffer) {
   }
   if (/коэффициент плотности|расчетн[а-я]* масс/.test(headerText)) return 'template';
   if (/наименование категори/.test(headerText) && /куб|кг в год|норматив накопления/.test(headerText)) return 'norms';
-  if (/категор/.test(headerText) && /расчетн/.test(headerText)) return 'registry';
+  // В выгрузке реестра рядом с категорией стоит хотя бы один из признаков
+  // источника. Количества расчётных единиц может и не быть — такие выгрузки
+  // тоже встречаются, и по одной категории их не отличить от файла нормативов.
+  if (/категор/.test(headerText)
+    && /расчетн|зон[аы] деятельн|муниципальн|адрес|источник/.test(headerText)) return 'registry';
   if (/норматив/i.test(file.name)) return 'norms';
   if (/общи[хе]\s*сведени/i.test(file.name)) return 'template';
   if (/реестр|иоо/i.test(file.name)) return 'registry';
@@ -121,10 +143,19 @@ async function parseEntry(entry) {
   }
 }
 
+// Общих сведений и приказ в расчёте по одному, выгрузок реестра бывает
+// несколько — их и можно догружать по частям.
+const SINGLE = new Set(['template', 'norms']);
+
 async function addFiles(fileList) {
   const incoming = [...fileList];
   if (!incoming.length) return;
+  let replaced = false;
+
   await withOverlay('Чтение файлов…', async () => {
+    // Сначала читаем и распознаём вид, и только потом решаем, что делать с
+    // уже загруженным: иначе не отличить догрузку файла от нового комплекта.
+    const prepared = [];
     for (const file of incoming) {
       const entry = {
         id: `f${(fileCounter += 1)}`,
@@ -136,10 +167,34 @@ async function addFiles(fileList) {
         error: null,
         info: '',
       };
-      state.files.push(entry);
       try {
         entry.buffer = await readFile(file);
         entry.kind = detectKind(file, entry.buffer.slice(0));
+      } catch (error) {
+        entry.error = error.message;
+      }
+      prepared.push(entry);
+    }
+
+    // Принесли новые общие сведения, а прежние уже загружены — это новый
+    // расчёт: прежние файлы и правила сопоставления к нему отношения не имеют.
+    const kinds = new Set(prepared.map((entry) => entry.kind));
+    if (kinds.has('template') && state.template) {
+      resetSession();
+      replaced = true;
+    } else {
+      // Приказ в расчёте один: новый заменяет прежний, а не встаёт рядом.
+      for (const kind of kinds) {
+        if (!SINGLE.has(kind)) continue;
+        if (state.files.some((item) => item.kind === kind)) replaced = true;
+        state.files = state.files.filter((item) => item.kind !== kind);
+      }
+    }
+
+    for (const entry of prepared) {
+      state.files.push(entry);
+      if (entry.error) continue;
+      try {
         await parseEntry(entry);
       } catch (error) {
         entry.error = error.message;
@@ -148,6 +203,8 @@ async function addFiles(fileList) {
     }
     collectParsed();
   });
+
+  if (replaced) toast('Загружен новый комплект — прежние файлы и правила сброшены', 'ok');
   refreshAll();
 }
 
@@ -268,32 +325,6 @@ function storeNormRule(key) {
     manualMass: mapping.manualMass,
     manualVolume: mapping.manualVolume,
   };
-  persistRules();
-}
-
-function persistRules() {
-  try {
-    localStorage.setItem(RULES_STORAGE_KEY, JSON.stringify(state.rules));
-  } catch {
-    // Приватный режим браузера — сохранение недоступно, работа продолжается.
-  }
-}
-
-function restoreRules() {
-  try {
-    const saved = localStorage.getItem(RULES_STORAGE_KEY);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      state.rules = {
-        norms: parsed.norms || {},
-        registry: parsed.registry || {},
-        zones: parsed.zones || {},
-        normsLayout: parsed.normsLayout || undefined,
-      };
-    }
-  } catch {
-    state.rules = { norms: {}, registry: {}, zones: {} };
-  }
 }
 
 /* ----------------------------------------------------------------- расчёт */
@@ -355,7 +386,6 @@ const actions = {
 
   resetNormRule(key) {
     delete state.rules.norms[key];
-    persistRules();
     const auto = matchNorms(state.categories.filter((item) => item.key === key), state.norms.entries);
     state.normMapping.set(key, auto.get(key));
     recalculate();
@@ -369,14 +399,12 @@ const actions = {
     mapping.auto = false;
     mapping.status = templateKey ? STATUS.MANUAL : STATUS.IGNORED;
     state.rules.registry[key] = templateKey;
-    persistRules();
     recalculate();
     refreshData();
   },
 
   resetRegistryRule(key) {
     delete state.rules.registry[key];
-    persistRules();
     const category = state.registry.categories.filter((item) => item.key === key);
     const auto = matchRegistryCategories(category, state.categories);
     state.registryMapping.set(key, auto.get(key));
@@ -448,7 +476,6 @@ const actions = {
         + `таблиц: ${proposal.preview.tables.length}, разметка: ${proposal.preview.source}`;
     }
     state.rules.normsLayout = proposal.markup;
-    persistRules();
     state.ai.norms.proposal = null;
     collectParsed();
     refreshAll();
@@ -466,7 +493,6 @@ const actions = {
         + `, разметка: ${proposal.parsed.source}`;
     }
     state.rules.registryMarkup = proposal.markup;
-    persistRules();
     state.ai.registry.proposal = null;
     collectParsed();
     refreshAll();
@@ -484,7 +510,6 @@ const actions = {
   aiReset(which) {
     if (which === 'registry') delete state.rules.registryMarkup;
     else delete state.rules.normsLayout;
-    persistRules();
     const kind = which === 'registry' ? 'registry' : 'norms';
     const entry = state.files.find((item) => item.kind === kind);
     if (!entry) return;
@@ -506,7 +531,6 @@ const actions = {
     mapping.auto = false;
     mapping.status = templateKey ? STATUS.MANUAL : STATUS.IGNORED;
     state.rules.zones[key] = templateKey;
-    persistRules();
     recalculate();
     refreshData();
   },
@@ -528,6 +552,7 @@ function refreshData() {
 function refreshAll() {
   renderFiles(state, actions);
   renderAi(state, actions);
+  $('#restart-row').hidden = state.files.length === 0;
   refreshData();
 }
 
@@ -623,7 +648,6 @@ async function loadRules(file) {
       normsLayout: rules.normsLayout || undefined,
       registryMarkup: rules.registryMarkup || undefined,
     };
-    persistRules();
     if (state.template && state.norms && state.registry) buildMappings();
     refreshAll();
     toast('Правила сопоставления применены', 'ok');
@@ -683,6 +707,12 @@ function bind() {
   $('#ai-run').addEventListener('click', () => actions.aiRun());
   $('#ai-run-registry').addEventListener('click', () => actions.aiRunRegistry());
 
+  $('#restart').addEventListener('click', () => {
+    resetSession();
+    refreshAll();
+    toast('Всё сброшено — можно загружать новый комплект файлов', 'ok');
+  });
+
   $('#download-rules').addEventListener('click', downloadRules);
   $('#rules-input').addEventListener('change', (event) => {
     const [file] = event.target.files;
@@ -707,7 +737,6 @@ function checkLibraries() {
   return false;
 }
 
-restoreRules();
 state.ai.endpoint = getEndpoint();
 if (checkLibraries()) {
   bind();

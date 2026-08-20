@@ -139,6 +139,13 @@ code { background: var(--bg); padding: 1px 5px; border-radius: 4px; font-size: 1
   font-size: 13.5px;
 }
 .toolbar .spacer { flex: 1; }
+.restart {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 16px 0 0;
+}
 .stats { color: var(--muted); font-size: 13px; }
 
 select, input[type="search"], input[type="text"], input[type="number"] {
