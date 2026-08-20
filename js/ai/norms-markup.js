@@ -7,26 +7,52 @@
 import { applyLayouts, significantRows, headerTexts } from '../parse/norms.js';
 import { massFactor, volumeFactor } from '../lib/units.js';
 
-export const SAMPLE_LIMITS = { tables: 12, rows: 6, columns: 12, cell: 200 };
+// Приказ уходит целиком: по одной шапке модель не отличит таблицу нормативов
+// от похожей на неё, а лишние строки стоят копейки. Пределы здесь — только
+// защита от файла, который окажется неожиданно огромным.
+export const SAMPLE_LIMITS = { tables: 12, rows: 400, columns: 16, cell: 300, cells: 20000 };
 
 const BASIS_VALUES = new Set(['person', 'sqm', 'place', 'other']);
 
 /**
- * Готовит образец таблиц для отправки: подписи и первые строки.
- * Данные реестра сюда не попадают — в этой задаче он не участвует.
+ * Готовит таблицы приказа для отправки — целиком, со всеми строками.
+ *
+ * Данные реестра сюда не попадают: приказ об утверждении нормативов —
+ * документ общедоступный, а реестр источников — нет.
+ *
+ * Общий размер ограничен: если приказ окажется больше предела, строки
+ * обрезаются, но так, чтобы каждая таблица осталась представлена.
  */
 export function buildSample(norms) {
-  return (norms.rawTables || [])
+  const tables = (norms.rawTables || [])
     .filter((table) => significantRows(table.grid).length > 1)
-    .slice(0, SAMPLE_LIMITS.tables)
-    .map((table) => ({
-      index: table.index,
-      title: String(table.title || '').slice(0, SAMPLE_LIMITS.cell),
-      rows: significantRows(table.grid)
-        .slice(0, SAMPLE_LIMITS.rows)
-        .map((row) => row.slice(0, SAMPLE_LIMITS.columns)
-          .map((cell) => String(cell ?? '').slice(0, SAMPLE_LIMITS.cell))),
-    }));
+    .slice(0, SAMPLE_LIMITS.tables);
+  if (!tables.length) return [];
+
+  // Предел строк делится между таблицами поровну, но неиспользованное одной
+  // таблицей достаётся остальным: обычно нормативы лежат в одной большой.
+  const width = Math.min(SAMPLE_LIMITS.columns,
+    Math.max(1, ...tables.map((table) => Math.max(...table.grid.map((row) => row.length)))));
+  let budget = Math.floor(SAMPLE_LIMITS.cells / width);
+  const order = [...tables].sort(
+    (a, b) => significantRows(a.grid).length - significantRows(b.grid).length,
+  );
+  const allowance = new Map();
+  order.forEach((table, index) => {
+    const share = Math.floor(budget / (order.length - index));
+    const rows = Math.min(significantRows(table.grid).length, share, SAMPLE_LIMITS.rows);
+    allowance.set(table.index, rows);
+    budget -= rows;
+  });
+
+  return tables.map((table) => ({
+    index: table.index,
+    title: String(table.title || '').slice(0, SAMPLE_LIMITS.cell),
+    rows: significantRows(table.grid)
+      .slice(0, allowance.get(table.index))
+      .map((row) => row.slice(0, width)
+        .map((cell) => String(cell ?? '').slice(0, SAMPLE_LIMITS.cell))),
+  }));
 }
 
 /** Человекочитаемый вид того, что уходит из браузера. */

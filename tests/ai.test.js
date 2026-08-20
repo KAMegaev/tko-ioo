@@ -3,8 +3,10 @@ import assert from 'node:assert/strict';
 import { libs } from './helpers/env.js';
 import { normsGrid, registryWorkbook } from './helpers/fixtures.js';
 
-import { extractFromGrid, applyLayouts } from '../js/parse/norms.js';
-import { buildSample, describeSample, validateMarkup, compare } from '../js/ai/norms-markup.js';
+import { extractFromGrid, applyLayouts, significantRows } from '../js/parse/norms.js';
+import {
+  buildSample, describeSample, validateMarkup, compare, SAMPLE_LIMITS,
+} from '../js/ai/norms-markup.js';
 import { DEFAULT_ENDPOINT, validateEndpoint, isCustomEndpoint } from '../js/ai/client.js';
 import { validateMarkup as validateRegistryMarkup } from '../js/ai/registry-markup.js';
 import {
@@ -66,13 +68,37 @@ test('встроенный адрес прокси пригоден к испо�
   assert.equal(isCustomEndpoint(''), false);
 });
 
-test('в образец попадают только шапки и первые строки, без данных реестра', () => {
-  const sample = buildSample(normsFile());
+test('приказ уходит помощнику целиком, со всеми строками', () => {
+  const norms = normsFile();
+  const sample = buildSample(norms);
   assert.equal(sample.length, 2, 'таблица из одной строки в образец не идёт');
-  assert.ok(sample.every((table) => table.rows.length <= 6));
+  // Ни одна строка приказа не потеряна: по одной шапке разметку не проверить.
+  for (const table of sample) {
+    const raw = norms.rawTables.find((item) => item.index === table.index);
+    assert.equal(table.rows.length, significantRows(raw.grid).length);
+  }
   const text = describeSample(sample);
   assert.ok(text.includes('Жилые дома'));
-  assert.ok(new Blob([text]).size < 8000, 'образец должен оставаться небольшим');
+  assert.ok(text.includes('Кладбища'), 'строки из конца таблицы тоже уходят');
+});
+
+test('огромный приказ обрезается по общему пределу, но все таблицы остаются', () => {
+  const many = (count, prefix) => Array.from({ length: count }, (unused, index) => [
+    `${prefix} ${index}`, 'на 1 человека', '1,5', '200',
+  ]);
+  const norms = {
+    fileName: 'приказ.docx',
+    entries: [],
+    rawTables: [
+      { index: 0, title: 'Приложение 1', grid: [['Наименование', 'Единица', 'куб.м', 'кг'], ...many(9000, 'Категория')] },
+      { index: 1, title: 'Приложение 2', grid: [['Наименование', 'Единица', 'куб.м', 'кг'], ...many(40, 'Прочее')] },
+    ],
+  };
+  const sample = buildSample(norms);
+  assert.equal(sample.length, 2, 'вторая таблица не должна пропасть из-за первой');
+  assert.equal(sample[1].rows.length, 41, 'небольшая таблица уходит целиком');
+  const cells = sample.reduce((sum, table) => sum + table.rows.length * 4, 0);
+  assert.ok(cells <= SAMPLE_LIMITS.cells, `ячеек ${cells}`);
 });
 
 test('разметка нескольких таблиц объединяет нормативы', () => {

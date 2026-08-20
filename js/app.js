@@ -206,6 +206,34 @@ async function addFiles(fileList) {
 
   if (replaced) toast('Загружен новый комплект — прежние файлы и правила сброшены', 'ok');
   refreshAll();
+  await runAssistants();
+}
+
+/**
+ * Отдаёт разбор на проверку помощнику — сразу после загрузки, без нажатия
+ * кнопки. Приказ уходит целиком, из реестра — только шапка и первые строки.
+ *
+ * Встроенные правила разбора остаются обходным путём: их результат и
+ * показывается, если помощник недоступен или его разметка не прошла проверку.
+ */
+async function runAssistants() {
+  if (!state.ai.endpoint) return;
+  const pending = (kind) => state.files.find(
+    (item) => item.kind === kind && item.buffer && !item.assistantChecked,
+  );
+
+  const norms = pending('norms');
+  if (norms && norms.parsed) {
+    norms.assistantChecked = true;
+    await actions.aiRun(true);
+  }
+  const registry = pending('registry');
+  if (registry) {
+    for (const item of state.files) {
+      if (item.kind === 'registry') item.assistantChecked = true;
+    }
+    await actions.aiRunRegistry(true);
+  }
 }
 
 /**
@@ -356,6 +384,7 @@ const actions = {
     if (!entry || entry.kind === kind) return;
     entry.kind = kind;
     entry.parsed = null;
+    entry.assistantChecked = false;
     await withOverlay('Разбор файла…', async () => {
       try {
         await parseEntry(entry);
@@ -365,6 +394,7 @@ const actions = {
       collectParsed();
     });
     refreshAll();
+    await runAssistants();
   },
 
   removeFile(id) {
@@ -425,7 +455,11 @@ const actions = {
     renderAi(state, actions);
   },
 
-  async aiRun() {
+  /**
+   * @param {boolean} auto запуск при загрузке файла, а не по кнопке: разметка,
+   *   прошедшая проверку, применяется сразу.
+   */
+  async aiRun(auto = false) {
     if (!state.norms || !state.ai.endpoint) return;
     const task = state.ai.norms;
     Object.assign(task, { status: 'running', error: null, proposal: null, sample: null });
@@ -436,16 +470,24 @@ const actions = {
       const checked = validateMarkup(state.norms, answer.result);
       if (checked.ok) checked.compare = compare(state.norms, checked.preview);
       task.proposal = checked;
-      if (!checked.ok) toast('Предложение помощника по нормативам не прошло проверку', 'error');
+      if (!checked.ok) toast('Разметка помощника не прошла проверку — разбор оставлен встроенный', 'error');
+      // Сама собой разметка применяется, только если ничего не теряет.
+      // Исчезновение категорий — единственное, что стоит показать человеку
+      // до применения: молча недосчитаться нормативов хуже, чем спросить.
+      else if (auto && !checked.compare.removed.length) {
+        task.status = 'idle';
+        actions.aiApply();
+        return;
+      }
     } catch (error) {
       task.error = error.message;
-      toast(error.message, 'error');
+      if (!auto) toast(error.message, 'error');
     }
     task.status = 'idle';
     renderAi(state, actions);
   },
 
-  async aiRunRegistry() {
+  async aiRunRegistry(auto = false) {
     const entry = state.files.find((item) => item.kind === 'registry');
     if (!entry || !entry.buffer || !state.ai.endpoint) return;
     const task = state.ai.registry;
@@ -457,10 +499,15 @@ const actions = {
       task.proposal = validateRegistryMarkup(
         entry.buffer.slice(0), task.sample, answer.result, entry.name, libs.XLSX,
       );
-      if (!task.proposal.ok) toast('Предложение помощника по реестру не прошло проверку', 'error');
+      if (!task.proposal.ok) toast('Разметка помощника не прошла проверку — разбор оставлен встроенный', 'error');
+      else if (auto) {
+        task.status = 'idle';
+        await actions.aiApplyRegistry();
+        return;
+      }
     } catch (error) {
       task.error = error.message;
-      toast(error.message, 'error');
+      if (!auto) toast(error.message, 'error');
     }
     task.status = 'idle';
     renderAi(state, actions);
@@ -482,21 +529,36 @@ const actions = {
     toast(`Разметка нормативов применена: ${proposal.preview.entries.length}`, 'ok');
   },
 
-  aiApplyRegistry() {
+  async aiApplyRegistry() {
     const proposal = state.ai.registry.proposal;
     if (!proposal || !proposal.ok) return;
-    const entry = state.files.find((item) => item.kind === 'registry');
-    if (entry) {
-      entry.parsed = proposal.parsed;
-      entry.info = `лист «${proposal.parsed.sheetName}», строк: ${proposal.parsed.rows.length}`
-        + (proposal.parsed.hasUnits ? '' : ', без количества расчётных единиц')
-        + `, разметка: ${proposal.parsed.source}`;
-    }
     state.rules.registryMarkup = proposal.markup;
     state.ai.registry.proposal = null;
-    collectParsed();
+
+    // Выгрузок реестра бывает несколько, и свёрстаны они одинаково: разметку
+    // применяем ко всем. Если какому-то файлу она не подошла, у него остаётся
+    // прежний разбор — терять целую выгрузку из-за разметки нельзя.
+    let applied = 0;
+    await withOverlay('Повторный разбор реестра…', async () => {
+      for (const entry of state.files.filter((item) => item.kind === 'registry' && item.buffer)) {
+        try {
+          const parsed = parseRegistryWorkbook(
+            entry.buffer.slice(0), entry.name, libs.XLSX, proposal.markup,
+          );
+          if (!parsed.rows.length) continue;
+          entry.parsed = parsed;
+          entry.info = `лист «${parsed.sheetName}», строк: ${parsed.rows.length}`
+            + (parsed.hasUnits ? '' : ', без количества расчётных единиц')
+            + `, разметка: ${parsed.source}`;
+          applied += 1;
+        } catch {
+          // Файл остаётся с прежним разбором.
+        }
+      }
+      collectParsed();
+    });
     refreshAll();
-    toast(`Разметка реестра применена: строк ${proposal.parsed.rows.length}`, 'ok');
+    toast(`Разметка реестра применена к ${applied} ${applied === 1 ? 'файлу' : 'файлам'}`, 'ok');
   },
 
   aiDismiss(which) {

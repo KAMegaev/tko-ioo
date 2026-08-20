@@ -141,7 +141,7 @@ export function renderAi(state, actions) {
     result.append(el('div.issue.error', {}, [
       el('div.title', {}, 'Нормативы не распознаны'),
       el('div.detail', {}, 'Ни одна таблица в файле не похожа на таблицу нормативов — '
-        + 'нажмите «Разобрать нормативы».'),
+        + 'проверьте разбор кнопкой «Проверить нормативы».'),
     ]));
   }
 
@@ -154,13 +154,13 @@ export function renderAi(state, actions) {
     result.append(el('div.issue.error', {}, [
       el('div.title', {}, 'Реестр не разобран'),
       el('div.detail', {}, registryEntry.error),
-      el('div.detail', {}, 'Нажмите «Разобрать реестр», чтобы помощник определил столбцы.'),
+      el('div.detail', {}, 'Нажмите «Проверить реестр», чтобы помощник определил столбцы заново.'),
     ]));
   } else if (registry && !registry.hasUnits) {
     result.append(el('div.issue.warning', {}, [
       el('div.title', {}, 'В реестре не найдено количество расчётных единиц'),
       el('div.detail', {}, 'Столбец G останется нулевым, масса и объём не рассчитаются. '
-        + 'Если столбец в файле всё же есть, нажмите «Разобрать реестр».'),
+        + 'Если столбец в файле всё же есть, нажмите «Проверить реестр».'),
     ]));
   }
 
@@ -171,7 +171,7 @@ export function renderAi(state, actions) {
     const task = state.ai[which];
     if (task.status === 'running') {
       result.append(el('p.hint', {}, which === 'norms'
-        ? 'Помощник разбирает таблицы нормативов…' : 'Помощник разбирает выгрузку реестра…'));
+        ? 'Помощник проверяет разбор приказа…' : 'Помощник проверяет разбор выгрузки реестра…'));
       continue;
     }
     if (task.error) result.append(errorBlock(task.error));

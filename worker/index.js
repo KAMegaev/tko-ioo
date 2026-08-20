@@ -10,12 +10,16 @@ const ALLOWED_ORIGINS = [
   'http://127.0.0.1:8000',
 ];
 
+// Приказ о нормативах уходит целиком, поэтому пределы рассчитаны на документ
+// в сотни строк. Выгрузка реестра по-прежнему присылается образцом в
+// несколько строк — её ограничивает уже сам клиент.
 const LIMITS = {
-  body: 64 * 1024, // байт
+  body: 1024 * 1024, // байт
   tables: 12,
-  rows: 6,
-  columns: 12,
-  cell: 200,
+  rows: 400,
+  columns: 16,
+  cell: 300,
+  cells: 24000, // всего ячеек во всех таблицах
 };
 
 const MODEL = 'claude-haiku-4-5-20251001';
@@ -23,8 +27,11 @@ const MODEL = 'claude-haiku-4-5-20251001';
 const NORMS_SYSTEM = `Ты размечаешь таблицы из региональных приказов об утверждении нормативов
 накопления твёрдых коммунальных отходов (ТКО).
 
-Тебе дают несколько таблиц из одного документа: подпись, первые строки и номера столбцов.
+Тебе дают таблицы одного документа целиком: подпись, все строки и номера столбцов.
 Нужно указать, в какой таблице лежат нормативы и где именно находятся значения.
+Значения из таблиц не переписывай и ничего не вычисляй: их прочитает программа —
+твоё дело сказать, где они лежат. Строки даны полностью как раз для того, чтобы
+разметку можно было проверить по всей таблице, а не по одной шапке.
 
 Правила:
 - Таблиц с нормативами может быть несколько: в приказах жильё («на 1 человека») и
@@ -152,14 +159,21 @@ function json(data, status, origin) {
 /** Обрезает присланный образец до безопасных размеров. */
 function trimSample(tables) {
   if (!Array.isArray(tables)) throw new Error('Ожидался список таблиц');
+  let cells = LIMITS.cells;
   return tables.slice(0, LIMITS.tables).map((table, order) => {
     const rows = Array.isArray(table.rows) ? table.rows : [];
+    const trimmed = [];
+    for (const row of rows.slice(0, LIMITS.rows)) {
+      const line = (Array.isArray(row) ? row : []).slice(0, LIMITS.columns)
+        .map((cell) => String(cell ?? '').slice(0, LIMITS.cell));
+      if (cells - line.length < 0) break;
+      cells -= line.length;
+      trimmed.push(line);
+    }
     return {
       index: Number.isInteger(table.index) ? table.index : order,
       title: String(table.title || '').slice(0, LIMITS.cell),
-      rows: rows.slice(0, LIMITS.rows).map((row) => (Array.isArray(row) ? row : [])
-        .slice(0, LIMITS.columns)
-        .map((cell) => String(cell ?? '').slice(0, LIMITS.cell))),
+      rows: trimmed,
     };
   });
 }
