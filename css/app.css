@@ -29,16 +29,23 @@ body {
 .wrap { max-width: 1240px; margin: 0 auto; padding: 0 20px; }
 
 .page-header {
+  position: relative;
   background: linear-gradient(135deg, #23503a, #1f6f43);
   color: #fff;
   padding: 26px 0 22px;
 }
 .page-header h1 { margin: 0 0 6px; font-size: 24px; font-weight: 600; }
-.page-header-content { display: flex; align-items: flex-start; gap: 24px; }
-.page-header-copy { flex: 1; min-width: 0; }
-.page-header-bin { display: block; width: 96px; height: auto; flex-shrink: 0; }
+.page-header-content { min-height: 112px; padding-right: 140px; }
+.page-header-bin {
+  position: absolute;
+  top: 26px;
+  right: 20px;
+  display: block;
+  width: 96px;
+  height: auto;
+}
 @media (max-width: 600px) {
-  .page-header-content { gap: 12px; }
+  .page-header-content { min-height: 66px; padding-right: 88px; }
   .page-header-bin { width: 56px; }
 }
 .lead { margin: 0; max-width: 70ch; color: #d8e8de; font-size: 14px; }
