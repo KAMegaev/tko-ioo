@@ -34,6 +34,13 @@ body {
   padding: 26px 0 22px;
 }
 .page-header h1 { margin: 0 0 6px; font-size: 24px; font-weight: 600; }
+.page-header-content { display: flex; align-items: flex-start; gap: 24px; }
+.page-header-copy { flex: 1; min-width: 0; }
+.page-header-bin { display: block; width: 96px; height: auto; flex-shrink: 0; }
+@media (max-width: 600px) {
+  .page-header-content { gap: 12px; }
+  .page-header-bin { width: 56px; }
+}
 .lead { margin: 0; max-width: 70ch; color: #d8e8de; font-size: 14px; }
 
 .steps {

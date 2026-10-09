@@ -26,7 +26,7 @@ jobs:
       - name: Исключить из публикации всё, кроме приложения
         run: |
           mkdir -p _site
-          cp -r index.html css js vendor _site/
+          cp -r index.html css images js vendor _site/
           touch _site/.nojekyll
 
       # enablement включает Pages в репозитории при первом запуске,
