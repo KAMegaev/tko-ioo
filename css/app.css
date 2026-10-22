@@ -230,13 +230,18 @@ table.grid.fit .badge { white-space: normal; }
 #norms-table th:nth-child(6), #norms-table td:nth-child(6) { width: 10%; }
 #norms-table th:nth-child(7), #norms-table td:nth-child(7) { width: 10%; }
 
-#registry-table th:nth-child(1), #registry-table td:nth-child(1) { width: 23%; }
-#registry-table th:nth-child(2), #registry-table td:nth-child(2) { width: 8%; }
-#registry-table th:nth-child(3), #registry-table td:nth-child(3) { width: 10%; }
-#registry-table th:nth-child(4), #registry-table td:nth-child(4) { width: 12%; }
-#registry-table th:nth-child(5), #registry-table td:nth-child(5) { width: 26%; }
-#registry-table th:nth-child(6), #registry-table td:nth-child(6) { width: 12%; }
-#registry-table th:nth-child(7), #registry-table td:nth-child(7) { width: 9%; }
+/* Две категории делят оставшееся место; служебные столбцы не сжимаются. */
+#registry-table { min-width: 1100px; }
+#registry-table th, #registry-table td { padding: 8px; }
+#registry-table th:nth-child(2), #registry-table td:nth-child(2) { width: 80px; }
+#registry-table th:nth-child(3), #registry-table td:nth-child(3) { width: 98px; }
+#registry-table th:nth-child(4), #registry-table td:nth-child(4) { width: 122px; }
+#registry-table th:nth-child(5), #registry-table td:nth-child(5) { width: 92px; }
+#registry-table th:nth-child(7), #registry-table td:nth-child(7) { width: 76px; }
+#registry-table th:nth-child(8), #registry-table td:nth-child(8) { width: 164px; overflow-wrap: normal; }
+#registry-table th:nth-child(9), #registry-table td:nth-child(9) { width: 76px; }
+#registry-table th:nth-child(7) { white-space: nowrap; }
+#registry-table .badge { max-width: 100%; overflow-wrap: normal; word-break: normal; }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 tr.row-attention { background: var(--warn-soft); }
 tr.row-none { background: var(--error-soft); }
