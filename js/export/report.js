@@ -4,6 +4,7 @@ import { STATUS_LABELS } from '../lib/match.js';
 import { humanize } from '../lib/formula.js';
 import { BASIS_LABELS } from '../lib/units.js';
 import { round } from '../lib/calc.js';
+import { similarity } from '../lib/text.js';
 
 const MODE_LABELS = {
   single: 'Прямое соответствие',
@@ -64,9 +65,10 @@ export function registryMappingTable({ registry, registryMapping, categoryByKey 
     'Категория (Выгрузка реестра ИОО)',
     'Строк в реестре',
     'Сумма расчётных единиц',
+    'Единица измерения',
     'Категория (Выгрузка общих сведений)',
+    '% соответствия',
     'Статус',
-    'Схожесть наименований',
     'Проверено вручную',
   ];
   const rows = registry.categories.map((category) => {
@@ -76,9 +78,10 @@ export function registryMappingTable({ registry, registryMapping, categoryByKey 
       category.name,
       category.rows,
       round(category.units, 2),
+      category.unitName || '',
       target ? target.name : '',
+      target ? percent(similarity(category.name, target.name)) : '',
       STATUS_LABELS[mapping.status] || STATUS_LABELS.none,
-      mapping.auto ? percent(mapping.score) : '',
       mapping.auto === false ? 'да' : '',
     ];
   });

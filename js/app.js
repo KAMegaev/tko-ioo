@@ -315,6 +315,17 @@ function applyRules() {
     });
   }
 
+  // Правила прежнего формата относились ко всему наименованию. Разносим их
+  // по единицам, чтобы затем каждое соответствие можно было менять и сбрасывать отдельно.
+  for (const [key, templateKey] of Object.entries(state.rules.registry)) {
+    if (state.registryMapping.has(key)) continue;
+    const categories = state.registry.categories.filter((item) => normalize(item.name) === key);
+    for (const category of categories) {
+      if (!Object.hasOwn(state.rules.registry, category.key)) state.rules.registry[category.key] = templateKey;
+    }
+    if (categories.length) delete state.rules.registry[key];
+  }
+
   for (const [key, templateKey] of Object.entries(state.rules.registry)) {
     const mapping = state.registryMapping.get(key);
     if (!mapping) continue;

@@ -3,6 +3,7 @@
 import { el, clear, num, percent, headRow } from './dom.js';
 import { STATUS_LABELS } from '../lib/match.js';
 import { round } from '../lib/calc.js';
+import { similarity } from '../lib/text.js';
 
 const KIND_LABELS = {
   template: 'Выгрузка общих сведений (шаблон)',
@@ -114,7 +115,9 @@ export function renderRegistryMapping(state, actions) {
     ['Строк', true],
     ['Источников', true],
     ['Расчётных единиц', true],
+    'Единица измерения',
     'Категория в форме общих сведений',
+    ['% соответствия', true],
     'Статус',
     '',
   ])));
@@ -122,9 +125,11 @@ export function renderRegistryMapping(state, actions) {
   const body = el('tbody');
   let shown = 0;
   let unmapped = 0;
+  const categoryByKey = new Map(state.categories.map((item) => [item.key, item]));
 
   for (const category of state.registry.categories) {
     const mapping = state.registryMapping.get(category.key);
+    const target = categoryByKey.get(mapping.templateKey);
     if (!mapping.templateKey) unmapped += 1;
     if (search && !category.name.toLowerCase().includes(search)) continue;
     if (filter === 'attention' && (mapping.status === 'exact' || mapping.status === 'auto') && mapping.auto !== false) continue;
@@ -164,7 +169,11 @@ export function renderRegistryMapping(state, actions) {
         .filter((group_) => group_.categoryKey === category.key)
         .reduce((sum, group_) => sum + group_.sources, 0))),
       el('td.num', {}, num(category.units)),
+      el('td', {}, category.unitName || '—'),
       el('td', {}, select),
+      el('td.num', {
+        title: 'Схожесть наименования реестра с выбранной категорией формы',
+      }, target ? percent(similarity(category.name, target.name)) : '—'),
       el('td', {}, el(`span.badge.${mapping.auto === false ? 'manual' : mapping.status}`, {},
         mapping.auto === false ? 'Задано вручную' : STATUS_LABELS[mapping.status])),
       el('td', {}, mapping.auto === false

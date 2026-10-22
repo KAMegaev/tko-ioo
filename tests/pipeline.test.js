@@ -12,6 +12,8 @@ import { templateCategories, matchNorms, matchRegistryCategories, matchZones } f
 import { buildResults, round } from '../js/lib/calc.js';
 import { verify } from '../js/lib/verify.js';
 import { fillTemplate } from '../js/export/fill.js';
+import { registryMappingTable } from '../js/export/report.js';
+import { normalize, similarity } from '../js/lib/text.js';
 
 const TEMPLATE_ROWS = [
   { zone: 'Вся территория', category: 'Автомойка', unit: 'Квадратный метр' },
@@ -100,6 +102,105 @@ test('колонки реестра определяются по заголов
   assert.deepEqual(detected.columns.category, 2);
   assert.deepEqual(detected.columns.units, 1);
   assert.deepEqual(detected.columns.zone, 0);
+});
+
+test('единица измерения не принимается за количество расчётных единиц', () => {
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+    ['Категория потребителя', 'Единица измерения расчетных единиц', 'Зона деятельности', 'Количество расчетных единиц'],
+    ['Гостиницы', 'Человек', 'Вся территория', 7],
+  ]), 'Реестр');
+  const buffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+  const parsed = parseRegistryWorkbook(buffer, 'Реестр.xlsx', XLSX);
+  assert.equal(parsed.columns.unitName, 1);
+  assert.equal(parsed.columns.units, 3);
+  assert.equal(parsed.rows[0].unitName, 'Человек');
+  assert.equal(parsed.rows[0].units, 7);
+});
+
+test('категории с разными единицами сопоставляются и рассчитываются независимо', () => {
+  const registry = aggregateRegistry([
+    { fileName: 'Реестр 1.xlsx', rows: [
+      { category: 'Гостиницы', unitName: 'Человек', zone: 'Вся территория', units: 3 },
+      { category: 'Гостиницы', unitName: 'м²', zone: 'Вся территория', units: 100 },
+      { category: 'Гостиницы', unitName: 'Человек', zone: 'Вся территория', units: 0 },
+    ] },
+    { fileName: 'Реестр 2.xlsx', rows: [
+      { category: 'Гостиницы', unitName: ' человек ', zone: 'Вся территория', units: 2 },
+      { category: 'Гостиницы', unitName: 'м2', zone: 'Вся территория', units: 50 },
+    ] },
+  ]);
+  assert.equal(registry.categories.length, 2);
+  assert.equal(registry.groups.size, 2);
+  const person = registry.categories.find((item) => item.unitName === 'Человек');
+  const area = registry.categories.find((item) => item.unitName === 'м²');
+  assert.equal(person.rows, 3);
+  assert.equal(person.units, 5);
+  assert.equal(area.rows, 2);
+  assert.equal(area.units, 150);
+  assert.notEqual(person.key, area.key);
+
+  const templateRows = [
+    { index: 0, excelRow: 4, category: 'Гостиницы', unit: 'Человек', zone: 'Вся территория' },
+    { index: 1, excelRow: 5, category: 'Гостиницы по площади', unit: 'м²', zone: 'Вся территория' },
+  ];
+  const categories = templateCategories(templateRows);
+  const registryMapping = matchRegistryCategories(registry.categories, categories);
+  registryMapping.set(area.key, {
+    ...registryMapping.get(area.key), templateKey: normalize('Гостиницы по площади'), auto: false, status: 'manual',
+  });
+  assert.equal(registryMapping.get(person.key).templateKey, normalize('Гостиницы'));
+  const { zoneMapping } = matchZones(registry.zones, templateRows);
+  const calculate = () => buildResults({
+    templateRows, registryGroups: registry.groups, registryMapping, zoneMapping,
+    normMapping: new Map(categories.map((item) => [item.key, { mode: 'manual', manualMass: 100, manualVolume: 2 }])),
+    normById: new Map(),
+  });
+  const results = calculate();
+  assert.deepEqual(results.rows.map((row) => [row.sources, row.units, row.mass, row.volume]), [
+    [2, 5, 0.5, 10], [2, 150, 15, 300],
+  ]);
+  assert.equal(results.unassigned.length, 0);
+
+  const report = registryMappingTable({
+    registry, registryMapping, categoryByKey: new Map(categories.map((item) => [item.key, item])),
+  });
+  const unitColumn = report[0].indexOf('Единица измерения');
+  const scoreColumn = report[0].indexOf('% соответствия');
+  assert.equal(unitColumn, report[0].indexOf('Сумма расчётных единиц') + 1);
+  assert.equal(scoreColumn, report[0].indexOf('Категория (Выгрузка общих сведений)') + 1);
+  const personReport = report.find((row) => row[unitColumn] === 'Человек');
+  const areaReport = report.find((row) => row[unitColumn] === 'м²');
+  assert.equal(personReport[scoreColumn], '100 %');
+  assert.equal(areaReport[scoreColumn], `${Math.round(similarity('Гостиницы', 'Гостиницы по площади') * 100)} %`,
+    'процент относится к выбранной вручную категории, а не к первоначальному кандидату');
+
+  registryMapping.get(person.key).templateKey = null;
+  const excluded = calculate();
+  assert.equal(excluded.rows[0].units, 0);
+  assert.equal(excluded.rows[1].units, 150, 'исключение одной единицы не меняет другую');
+  assert.equal(excluded.unassigned[0].units, 5);
+  const excludedReport = registryMappingTable({
+    registry, registryMapping, categoryByKey: new Map(categories.map((item) => [item.key, item])),
+  });
+  assert.equal(excludedReport.find((row) => row[unitColumn] === 'Человек')[scoreColumn], '');
+});
+
+test('пустая единица остаётся отдельной группой, а м² и м³ не объединяются', () => {
+  const registry = aggregateRegistry([{ fileName: 'Реестр.xlsx', rows: [
+    { category: 'Иная категория', zone: 'Зона', units: 4 },
+    { category: 'Иная категория', unitName: ' ', zone: 'Зона', units: null },
+    { category: 'Иная категория', unitName: 'м²', zone: 'Зона', units: 10 },
+    { category: 'Иная категория', unitName: 'м³', zone: 'Зона', units: 20 },
+  ] }]);
+  assert.equal(registry.categories.length, 3);
+  assert.equal(registry.groups.size, 3);
+  const unknown = registry.categories.find((item) => item.unitName === '');
+  assert.equal(unknown.key, normalize('Иная категория'));
+  assert.equal(unknown.rows, 2);
+  assert.equal(unknown.units, 4);
+  assert.equal(unknown.unitsKnown, false);
+  assert.equal(registry.rowsWithoutUnits, 1);
 });
 
 test('шаблон ФГИС читается несмотря на префикс и заниженный dimension', async () => {

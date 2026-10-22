@@ -23,6 +23,8 @@ export function detectColumns(grid, maxScan = 25) {
       const text = normalize(cell);
       if (!text) return;
       for (const [key, pattern] of Object.entries(COLUMN_PATTERNS)) {
+        // «Единица измерения расчётных единиц» — название единицы, а не количество.
+        if (key === 'units' && COLUMN_PATTERNS.unitName.test(text)) continue;
         if (map[key] === undefined && pattern.test(text)) {
           map[key] = colIndex;
           score += key === 'category' || key === 'units' ? 2 : 1;
@@ -133,7 +135,7 @@ export function parseRegistryWorkbook(arrayBuffer, fileName, XLSXLib, markup = n
 /**
  * Сводит строки нескольких файлов реестра в группы.
  *
- * Группировка ведётся по зоне, муниципальному образованию и категории.
+ * Группировка ведётся по зоне, муниципальному образованию, категории и единице измерения.
  * Учитывать ли МО, решает форма общих сведений: если в ней столбец МО пуст,
  * группы схлопываются по зоне и категории на этапе расчёта.
  */
@@ -150,7 +152,10 @@ export function aggregateRegistry(files) {
     for (const row of file.rows) {
       totalRows += 1;
       const zoneKey = normalize(row.zone);
-      const categoryKey = normalize(row.category);
+      const unitName = (row.unitName || '').trim().replace(/\s+/g, ' ');
+      const unitKey = normalize(unitName.normalize('NFKC'));
+      const nameKey = normalize(row.category);
+      const categoryKey = unitKey ? `${nameKey}||${unitKey}` : nameKey;
       const municipalityKey = normalize(row.municipality);
       const key = `${zoneKey}||${municipalityKey}||${categoryKey}`;
       let group = groups.get(key);
@@ -159,6 +164,7 @@ export function aggregateRegistry(files) {
           key,
           zone: row.zone,
           category: row.category,
+          unitName,
           municipality: row.municipality,
           zoneKey,
           categoryKey,
@@ -193,7 +199,7 @@ export function aggregateRegistry(files) {
 
       if (!categories.has(categoryKey)) {
         categories.set(categoryKey, {
-          name: row.category, key: categoryKey, rows: 0, units: 0, unitsKnown: true, zones: new Set(),
+          name: row.category, key: categoryKey, unitName, rows: 0, units: 0, unitsKnown: true, zones: new Set(),
         });
       }
       const category = categories.get(categoryKey);
