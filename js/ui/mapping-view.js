@@ -24,6 +24,8 @@ function normSelect(mapping, norms, onChange) {
   select.append(el('option', { value: '' }, '— не выбрано —'));
 
   const candidates = mapping.candidates || [];
+  const byId = new Map(norms.map((entry) => [entry.id, entry]));
+  const label = (entry) => `${entry.name} (${entry.unitText || BASIS_LABELS[entry.basis] || entry.basis || '—'})`;
   const suggestedIds = new Set(candidates.map((item) => item.id));
   if (candidates.length) {
     const group = el('optgroup', { label: 'Похожие наименования' });
@@ -31,7 +33,7 @@ function normSelect(mapping, norms, onChange) {
       group.append(el('option', {
         value: candidate.id,
         selected: candidate.id === mapping.entryId,
-      }, `${candidate.name} — ${percent(candidate.score)}`));
+      }, `${label(byId.get(candidate.id) || candidate)} — ${percent(candidate.score)}`));
     }
     select.append(group);
   }
@@ -41,7 +43,7 @@ function normSelect(mapping, norms, onChange) {
     group.append(el('option', {
       value: entry.id,
       selected: entry.id === mapping.entryId,
-    }, `${entry.name} (${BASIS_LABELS[entry.basis] || entry.basis || '—'})`));
+    }, label(entry)));
   }
   select.append(group);
   return select;

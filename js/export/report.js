@@ -201,17 +201,31 @@ function normsTable(norms) {
     'Значение в файле (масса)',
     'Значение в файле (объём)',
     'Файл',
+    'Место в документе',
+    'Выдержка из документа',
   ];
   const rows = norms.entries.map((entry) => [
     entry.name,
-    BASIS_LABELS[entry.basis] || entry.basis || '',
+    entry.unitText || BASIS_LABELS[entry.basis] || entry.basis || '',
     entry.mass ?? '',
     entry.volume ?? '',
     entry.rawMass ?? '',
     entry.rawVolume ?? '',
     entry.file,
+    entry.sourceLocation || '',
+    entry.sourceQuote || '',
   ]);
   return [header, ...rows];
+}
+
+/** Отдельный справочник доступен сразу после извлечения, без реестра и шаблона. */
+export function buildNormsWorkbook(norms, XLSXLib) {
+  const workbook = XLSXLib.utils.book_new();
+  const rows = normsTable(norms);
+  const sheet = XLSXLib.utils.aoa_to_sheet(rows);
+  sheet['!cols'] = widthsFor(rows);
+  XLSXLib.utils.book_append_sheet(workbook, sheet, 'Нормативы');
+  return XLSXLib.write(workbook, { bookType: 'xlsx', type: 'array' });
 }
 
 function widthsFor(aoa) {

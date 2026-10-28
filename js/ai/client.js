@@ -53,36 +53,44 @@ export function validateEndpoint(url) {
  * @param {Array} tables образец: таблицы приказа либо листы книги
  * @returns {Promise<{result: object, usage: object, model: string}>}
  */
-export async function requestMarkup(endpoint, task, tables) {
+async function request(endpoint, payload, timeout = TIMEOUT) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT);
-  let response;
+  const timer = setTimeout(() => controller.abort(), timeout);
   try {
-    response = await fetch(endpoint, {
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ task, tables }),
+      body: JSON.stringify(payload),
       signal: controller.signal,
     });
+    let data;
+    try {
+      data = await response.json();
+    } catch (error) {
+      if (error.name === 'AbortError') throw error;
+      throw new Error(`Помощник ответил неразборчиво (код ${response.status})`);
+    }
+    if (!response.ok || data.error) {
+      if (payload.task === 'norms-extract' && data.error === 'Неизвестная задача') {
+        throw new Error('Прокси ещё не поддерживает извлечение нормативов. Обновите Cloudflare Worker из папки worker.');
+      }
+      throw new Error(data.error || `Помощник ответил ошибкой (код ${response.status})`);
+    }
+    if (!data.result) throw new Error('Помощник не вернул результат');
+    return data;
   } catch (error) {
+    if (error.name === 'AbortError') throw new Error(`Помощник не ответил за ${timeout / 1000} секунд. Повторите обработку или разделите документ.`);
+    throw error;
+  } finally {
     clearTimeout(timer);
-    if (error.name === 'AbortError') throw new Error('Помощник не ответил за 40 секунд');
-    throw new Error(`Не удалось обратиться к помощнику: ${error.message}`);
   }
-  clearTimeout(timer);
-
-  let data;
-  try {
-    data = await response.json();
-  } catch {
-    throw new Error(`Помощник ответил неразборчиво (код ${response.status})`);
-  }
-  if (!response.ok || data.error) {
-    throw new Error(data.error || `Помощник ответил ошибкой (код ${response.status})`);
-  }
-  if (!data.result) throw new Error('Помощник не вернул разметку');
-  return data;
 }
+
+export const requestMarkup = (endpoint, task, tables) => request(endpoint, { task, tables });
+
+/** Полное извлечение из документа, включая визуальное чтение PDF и изображений. */
+export const requestNormsExtraction = (endpoint, document) =>
+  request(endpoint, { task: 'norms-extract', document }, 300000);
 
 /** Разметка таблиц нормативов. */
 export const requestNormsMarkup = (endpoint, tables) => requestMarkup(endpoint, 'norms-markup', tables);

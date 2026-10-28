@@ -47,7 +47,9 @@ export function renderFiles(state, actions) {
   }
   if (state.norms) {
     cards.append(card('Нормативов распознано', state.norms.entries.length,
-      `таблиц: ${state.norms.tables.length}`));
+      state.norms.source === 'ИИ: извлечение нормативов'
+        ? 'ИИ: извлечение из полного документа'
+        : `таблиц: ${state.norms.tables.length}`));
   }
   if (state.registry) {
     cards.append(card('Строк реестра', state.registry.totalRows,

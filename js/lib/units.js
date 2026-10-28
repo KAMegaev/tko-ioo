@@ -4,7 +4,7 @@
 import { normalize } from './text.js';
 
 function words(value) {
-  return normalize(value).split(' ').filter(Boolean);
+  return normalize(String(value ?? '').normalize('NFKC')).split(' ').filter(Boolean);
 }
 
 function hasWord(list, ...variants) {

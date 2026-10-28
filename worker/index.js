@@ -1,8 +1,10 @@
-// Прокси к Anthropic API для разметки таблиц нормативов.
+// Прокси к Anthropic API: извлечение нормативов и разметка реестра.
 //
 // Ключ хранится в секретах Cloudflare и в браузер не попадает.
-// Клиент присылает только образец таблиц; текст запроса и схема ответа
-// заданы здесь, поэтому через прокси нельзя обратиться к модели произвольно.
+// Текст задачи и схема ответа заданы на сервере.
+
+import { EXTRACTION_LIMITS } from '../js/ai/norms-contract.js';
+import { EXTRACTION_SYSTEM, EXTRACTION_TOOL, extractionContent } from './norms-extract.js';
 
 const ALLOWED_ORIGINS = [
   'https://kamegaev.github.io',
@@ -135,6 +137,7 @@ const REGISTRY_TOOL = {
 };
 
 const TASKS = {
+  'norms-extract': { system: EXTRACTION_SYSTEM, tool: EXTRACTION_TOOL },
   'norms-markup': { system: NORMS_SYSTEM, tool: NORMS_TOOL, describe: describeTables },
   'registry-markup': { system: REGISTRY_SYSTEM, tool: REGISTRY_TOOL, describe: describeSheets },
 };
@@ -154,6 +157,30 @@ function json(data, status, origin) {
     status,
     headers: { 'Content-Type': 'application/json; charset=utf-8', ...corsHeaders(origin) },
   });
+}
+
+async function readPayload(request) {
+  const reader = request.body?.getReader();
+  if (!reader) throw new Error('Пустой запрос');
+  const decoder = new TextDecoder();
+  let size = 0;
+  let text = '';
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > EXTRACTION_LIMITS.bodyBytes) {
+        await reader.cancel();
+        throw new Error('Слишком большой запрос');
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+    text += decoder.decode();
+    return JSON.parse(text);
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 /** Обрезает присланный образец до безопасных размеров. */
@@ -216,7 +243,7 @@ export default {
     }
 
     const length = Number(request.headers.get('Content-Length') || 0);
-    if (length > LIMITS.body) {
+    if (length > EXTRACTION_LIMITS.bodyBytes) {
       return json({ error: 'Слишком большой запрос' }, 413, allowed);
     }
 
@@ -230,50 +257,66 @@ export default {
 
     let payload;
     try {
-      const text = await request.text();
-      if (text.length > LIMITS.body) throw new Error('Слишком большой запрос');
-      payload = JSON.parse(text);
-    } catch {
+      payload = await readPayload(request);
+    } catch (error) {
+      if (error.message === 'Слишком большой запрос') return json({ error: error.message }, 413, allowed);
       return json({ error: 'Не удалось разобрать запрос' }, 400, allowed);
     }
+    if (typeof payload?.task !== 'string' || !Object.hasOwn(TASKS, payload.task)) {
+      return json({ error: 'Неизвестная задача' }, 400, allowed);
+    }
     const task = TASKS[payload.task];
-    if (!task) return json({ error: 'Неизвестная задача' }, 400, allowed);
 
-    let tables;
+    let content;
     try {
-      tables = trimSample(payload.tables);
+      if (payload.task === 'norms-extract') {
+        content = extractionContent(payload.document);
+      } else {
+        if (length > LIMITS.body || new TextEncoder().encode(JSON.stringify(payload)).length > LIMITS.body) {
+          return json({ error: 'Слишком большой образец' }, 413, allowed);
+        }
+        const tables = trimSample(payload.tables);
+        if (!tables.length) return json({ error: 'Пустой образец' }, 400, allowed);
+        content = task.describe(tables);
+      }
     } catch (error) {
       return json({ error: error.message }, 400, allowed);
     }
-    if (!tables.length) return json({ error: 'Пустой образец' }, 400, allowed);
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': env.ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        max_tokens: 1024,
-        system: task.system,
-        tools: [task.tool],
-        tool_choice: { type: 'tool', name: task.tool.name },
-        messages: [{ role: 'user', content: task.describe(tables) }],
-      }),
-    });
+    try {
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': env.ANTHROPIC_API_KEY,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model: MODEL,
+          max_tokens: payload.task === 'norms-extract' ? 32000 : 1024,
+          system: task.system,
+          tools: [task.tool],
+          tool_choice: { type: 'tool', name: task.tool.name },
+          messages: [{ role: 'user', content }],
+        }),
+      });
 
-    if (!response.ok) {
-      const detail = await response.text();
-      return json({ error: `Модель недоступна (${response.status})`, detail: detail.slice(0, 300) },
-        502, allowed);
+      if (!response.ok) {
+        const detail = await response.text();
+        return json({ error: `Модель недоступна (${response.status})`, detail: detail.slice(0, 300) },
+          502, allowed);
+      }
+
+      const data = await response.json();
+      if (data.stop_reason === 'max_tokens') {
+        return json({ error: 'Ответ ИИ не поместился целиком. Разделите документ на части; неполный результат не применён.' }, 502, allowed);
+      }
+      const block = (data.content || []).find((item) => item.type === 'tool_use' && item.name === task.tool.name);
+      if (!block) return json({ error: 'Модель не вернула структурированный результат' }, 502, allowed);
+
+      return json({ ok: true, result: block.input, usage: data.usage, model: data.model }, 200, allowed);
+    } catch {
+      return json({ error: 'Не удалось получить ответ ИИ. Повторите обработку.' }, 502, allowed);
     }
-
-    const data = await response.json();
-    const block = (data.content || []).find((item) => item.type === 'tool_use');
-    if (!block) return json({ error: 'Модель не вернула разметку' }, 502, allowed);
-
-    return json({ ok: true, result: block.input, usage: data.usage, model: data.model }, 200, allowed);
   },
 };

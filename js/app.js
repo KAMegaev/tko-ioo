@@ -9,20 +9,19 @@ import {
 import { buildResults } from './lib/calc.js';
 import { verify } from './lib/verify.js';
 import { fillTemplate } from './export/fill.js';
-import { buildReportWorkbook } from './export/report.js';
+import { buildReportWorkbook, buildNormsWorkbook } from './export/report.js';
 import { normalize } from './lib/text.js';
 import { el, $, clear, toast, withOverlay, download } from './ui/dom.js';
 import { renderNormsMapping } from './ui/mapping-view.js';
 import { renderFiles, renderZones, renderRegistryMapping, renderResults, renderCheck } from './ui/views.js';
 import { renderAi } from './ui/ai-view.js';
 import {
-  getEndpoint, setEndpoint, validateEndpoint, requestNormsMarkup, requestRegistryMarkup,
+  getEndpoint, setEndpoint, validateEndpoint, requestNormsExtraction, requestRegistryMarkup,
   isCustomEndpoint,
 } from './ai/client.js';
-import { buildSample, validateMarkup, compare } from './ai/norms-markup.js';
-import {
-  describeSample as describeRegistrySample, validateMarkup as validateRegistryMarkup,
-} from './ai/registry-markup.js';
+import { prepareNormsDocument, validateExtractedNorms } from './ai/norms-extract.js';
+import { NORMS_EXTENSIONS } from './ai/norms-contract.js';
+import { validateMarkup as validateRegistryMarkup } from './ai/registry-markup.js';
 
 const libs = { JSZip: globalThis.JSZip, XLSX: globalThis.XLSX };
 
@@ -49,10 +48,10 @@ function blankState() {
   };
 }
 
-/** Пустое состояние помощника разметки. */
+/** Пустое состояние ИИ-помощника. */
 const blankAi = () => ({
   endpoint: '',
-  norms: { status: 'idle', proposal: null, error: null, sample: null },
+  norms: { status: 'idle', proposal: null, error: null, sample: null, applied: null },
   registry: { status: 'idle', proposal: null, error: null, sample: null },
 });
 
@@ -87,7 +86,7 @@ function readFile(file) {
 function detectKind(file, arrayBuffer) {
   // Реестр и общие сведения приходят только книгами Excel, поэтому приказ —
   // единственное, что бывает в .docx и .pdf.
-  if (/\.(docx|pdf)$/i.test(file.name)) return 'norms';
+  if (/\.(docx|pdf|txt|csv|png|jpe?g|webp|gif)$/i.test(file.name)) return 'norms';
   let headerText = '';
   try {
     const workbook = libs.XLSX.read(arrayBuffer, { type: 'array', sheetRows: 30 });
@@ -122,13 +121,22 @@ async function parseEntry(entry) {
     entry.info = `лист «${template.sheetName}», строк данных: ${template.rows.length}, ` +
       `столбцы: ${Object.keys(template.columns).length}`;
   } else if (entry.kind === 'norms') {
-    const norms = applySavedLayout(await parseNorms({ name: entry.name }, entry.buffer.slice(0), libs));
+    // Встроенный разбор — резерв. Его неудача (например, скан без OCR)
+    // не должна мешать отправить исходный документ в ИИ.
+    let norms;
+    try {
+      norms = applySavedLayout(await parseNorms({ name: entry.name }, entry.buffer.slice(0), libs));
+    } catch (error) {
+      if (!NORMS_EXTENSIONS.test(entry.name)) throw error;
+      norms = { fileName: entry.name, entries: [], tables: [], skipped: [], rawTables: [],
+        source: 'эвристика', fallbackError: error.message };
+    }
     entry.parsed = norms;
     entry.info = norms.entries.length
       ? `нормативов: ${norms.entries.length}, таблиц: ${norms.tables.length}`
         + (norms.skipped.length ? `, пропущено таблиц: ${norms.skipped.length}` : '')
         + (norms.source !== 'эвристика' ? `, разметка: ${norms.source}` : '')
-      : `таблиц в файле: ${norms.rawTables.length}, нормативы не распознаны`;
+      : 'Ожидает извлечения нормативов с помощью ИИ';
   } else if (entry.kind === 'registry') {
     const registry = parseRegistryWorkbook(
       entry.buffer.slice(0), entry.name, libs.XLSX, savedRegistryMarkup(),
@@ -188,6 +196,7 @@ async function addFiles(fileList) {
         if (!SINGLE.has(kind)) continue;
         if (state.files.some((item) => item.kind === kind)) replaced = true;
         state.files = state.files.filter((item) => item.kind !== kind);
+        if (kind === 'norms') state.ai.norms = blankAi().norms;
       }
     }
 
@@ -210,11 +219,8 @@ async function addFiles(fileList) {
 }
 
 /**
- * Отдаёт разбор на проверку помощнику — сразу после загрузки, без нажатия
- * кнопки. Приказ уходит целиком, из реестра — только шапка и первые строки.
- *
- * Встроенные правила разбора остаются обходным путём: их результат и
- * показывается, если помощник недоступен или его разметка не прошла проверку.
+ * ИИ извлекает нормативы из исходного файла сразу после загрузки.
+ * Для реестра по-прежнему определяются лишь роли столбцов по образцу.
  */
 async function runAssistants() {
   if (!state.ai.endpoint) return;
@@ -223,9 +229,9 @@ async function runAssistants() {
   );
 
   const norms = pending('norms');
-  if (norms && norms.parsed) {
+  if (norms) {
     norms.assistantChecked = true;
-    await actions.aiRun(true);
+    await actions.aiRun();
   }
   const registry = pending('registry');
   if (registry) {
@@ -393,6 +399,7 @@ const actions = {
   async changeKind(id, kind) {
     const entry = state.files.find((item) => item.id === id);
     if (!entry || entry.kind === kind) return;
+    if (entry.kind === 'norms' || kind === 'norms') state.ai.norms = blankAi().norms;
     entry.kind = kind;
     entry.parsed = null;
     entry.assistantChecked = false;
@@ -409,6 +416,7 @@ const actions = {
   },
 
   removeFile(id) {
+    if (state.files.find((item) => item.id === id)?.kind === 'norms') state.ai.norms = blankAi().norms;
     state.files = state.files.filter((item) => item.id !== id);
     collectParsed();
     refreshAll();
@@ -466,36 +474,43 @@ const actions = {
     renderAi(state, actions);
   },
 
-  /**
-   * @param {boolean} auto запуск при загрузке файла, а не по кнопке: разметка,
-   *   прошедшая проверку, применяется сразу.
-   */
-  async aiRun(auto = false) {
-    if (!state.norms || !state.ai.endpoint) return;
+  downloadNorms() {
+    if (!state.norms?.entries.length) return;
+    const data = buildNormsWorkbook(state.norms, libs.XLSX);
+    download(new Blob([data]), `Нормативы_${timestamp()}.xlsx`,
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  },
+
+  /** Полное извлечение. Применяется только завершённый структурно корректный ответ. */
+  async aiRun() {
+    const entry = state.files.find((item) => item.kind === 'norms' && item.buffer);
+    if (!entry || !state.ai.endpoint || state.ai.norms.status === 'running') return;
     const task = state.ai.norms;
     Object.assign(task, { status: 'running', error: null, proposal: null, sample: null });
     renderAi(state, actions);
+    updateSteps();
     try {
-      task.sample = buildSample(state.norms);
-      const answer = await requestNormsMarkup(state.ai.endpoint, task.sample);
-      const checked = validateMarkup(state.norms, answer.result);
-      if (checked.ok) checked.compare = compare(state.norms, checked.preview);
+      task.sample = await prepareNormsDocument(entry, entry.buffer.slice(0), libs);
+      if (state.ai.norms !== task || !state.files.includes(entry)) return;
+      renderAi(state, actions);
+      const answer = await requestNormsExtraction(state.ai.endpoint, task.sample);
+      if (state.ai.norms !== task || !state.files.includes(entry)) return;
+      const checked = validateExtractedNorms(entry.name, answer.result, entry.parsed);
       task.proposal = checked;
-      if (!checked.ok) toast('Разметка помощника не прошла проверку — разбор оставлен встроенный', 'error');
-      // Сама собой разметка применяется, только если ничего не теряет.
-      // Исчезновение категорий — единственное, что стоит показать человеку
-      // до применения: молча недосчитаться нормативов хуже, чем спросить.
-      else if (auto && !checked.compare.removed.length) {
+      if (!checked.ok) toast('Извлечение нормативов не завершено — проверьте сообщение помощника', 'error');
+      else {
         task.status = 'idle';
         actions.aiApply();
         return;
       }
     } catch (error) {
+      if (state.ai.norms !== task || !state.files.includes(entry)) return;
       task.error = error.message;
-      if (!auto) toast(error.message, 'error');
+      toast(error.message, 'error');
     }
     task.status = 'idle';
     renderAi(state, actions);
+    updateSteps();
   },
 
   async aiRunRegistry(auto = false) {
@@ -531,13 +546,16 @@ const actions = {
     if (entry) {
       entry.parsed = proposal.preview;
       entry.info = `нормативов: ${proposal.preview.entries.length}, `
-        + `таблиц: ${proposal.preview.tables.length}, разметка: ${proposal.preview.source}`;
+        + `источник: ${proposal.preview.source}`;
+      entry.error = null;
     }
-    state.rules.normsLayout = proposal.markup;
+    // Извлечённые значения принадлежат конкретному файлу, а не переносимым правилам.
+    delete state.rules.normsLayout;
+    state.ai.norms.applied = proposal;
     state.ai.norms.proposal = null;
     collectParsed();
     refreshAll();
-    toast(`Разметка нормативов применена: ${proposal.preview.entries.length}`, 'ok');
+    toast(`Извлечено и применено нормативов: ${proposal.preview.entries.length}`, 'ok');
   },
 
   async aiApplyRegistry() {
@@ -583,6 +601,7 @@ const actions = {
   aiReset(which) {
     if (which === 'registry') delete state.rules.registryMarkup;
     else delete state.rules.normsLayout;
+    if (which === 'norms') state.ai.norms = blankAi().norms;
     const kind = which === 'registry' ? 'registry' : 'norms';
     const entry = state.files.find((item) => item.kind === kind);
     if (!entry) return;
@@ -630,7 +649,8 @@ function refreshAll() {
 }
 
 function updateSteps() {
-  const ready = Boolean(state.template && state.norms && state.registry);
+  const ready = Boolean(state.template && state.norms && state.registry)
+    && state.ai.norms.status !== 'running';
   for (const button of document.querySelectorAll('.step')) {
     const step = button.dataset.step;
     button.disabled = step !== 'files' && !ready;
