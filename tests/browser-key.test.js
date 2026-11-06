@@ -33,7 +33,7 @@ function storage(t) {
 test('ключ сохраняется в браузере, доступен после перезагрузки модуля и удаляется', async (t) => {
   const items = storage(t);
   assert.equal(hasBrowserApiKey(), false);
-  assert.equal(validateBrowserApiKey(''), 'Введите API-ключ Anthropic');
+  assert.equal(validateBrowserApiKey(''), 'Введите API-ключ');
   assert.ok(validateBrowserApiKey('a\nb'));
   assert.equal(validateBrowserApiKey(testKey), null);
   assert.equal(setBrowserApiKey(` ${testKey} `), true);

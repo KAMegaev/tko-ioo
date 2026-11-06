@@ -19,6 +19,7 @@ import {
   getEndpoint, setEndpoint, validateEndpoint, requestNormsExtraction, requestRegistryMarkup,
   isCustomEndpoint,
   hasBrowserApiKey, setBrowserApiKey, validateBrowserApiKey,
+  getBrowserProvider, getBrowserModel, BROWSER_PROVIDERS, DEFAULT_MODELS,
 } from './ai/client.js';
 import { prepareNormsDocument, validateExtractedNorms } from './ai/norms-extract.js';
 import { NORMS_EXTENSIONS } from './ai/norms-contract.js';
@@ -475,10 +476,10 @@ const actions = {
     renderAi(state, actions);
   },
 
-  aiSaveBrowserKey(value) {
-    const problem = validateBrowserApiKey(value);
+  aiSaveBrowserKey(value, provider, model) {
+    const problem = validateBrowserApiKey(value, provider, model);
     if (problem) { toast(problem, 'error'); return false; }
-    const persisted = setBrowserApiKey(value);
+    const persisted = setBrowserApiKey(value, provider, model);
     toast(persisted ? 'Прямое подключение включено, ключ сохранён в этом браузере'
       : 'Прямое подключение включено. Браузер не разрешает сохранить ключ после перезагрузки.', 'ok');
     renderAi(state, actions);
@@ -815,15 +816,25 @@ function bind() {
   endpointInput.value = state.ai.endpoint;
   $('#ai-save').addEventListener('click', () => actions.aiSaveEndpoint(endpointInput.value.trim()));
   const keyInput = $('#ai-browser-key');
+  const providerInput = $('#ai-provider');
+  const modelInput = $('#ai-model');
+  providerInput.value = getBrowserProvider();
+  modelInput.value = getBrowserModel();
+  providerInput.addEventListener('change', () => {
+    modelInput.value = DEFAULT_MODELS[providerInput.value];
+    keyInput.value = '';
+  });
   const updateKeyControls = () => {
     const enabled = hasBrowserApiKey();
-    $('#ai-key-status').textContent = enabled ? 'Включено прямое подключение к Anthropic.' : 'Ключ не задан. Используется серверный прокси.';
+    $('#ai-key-status').textContent = enabled
+      ? `Включено прямое подключение: ${BROWSER_PROVIDERS[getBrowserProvider()]}, модель ${getBrowserModel()}.`
+      : 'Ключ не задан. Используется серверный прокси Anthropic; для OpenAI сохраните его ключ выше.';
     $('#ai-key-remove').disabled = !enabled;
     keyInput.placeholder = enabled ? 'Ключ сохранён. Введите новый для замены.' : 'Вставьте API-ключ';
   };
   updateKeyControls();
   $('#ai-key-save').addEventListener('click', () => {
-    if (actions.aiSaveBrowserKey(keyInput.value)) keyInput.value = '';
+    if (actions.aiSaveBrowserKey(keyInput.value, providerInput.value, modelInput.value.trim())) keyInput.value = '';
     updateKeyControls();
   });
   $('#ai-key-remove').addEventListener('click', () => {

@@ -77,7 +77,16 @@
         <details class="endpoint-settings" id="browser-key-settings">
           <summary>API-ключ в браузере</summary>
           <div class="toolbar">
-            <label>Ключ Anthropic:
+            <label>Провайдер:
+              <select id="ai-provider">
+                <option value="openai">OpenAI</option>
+                <option value="anthropic">Anthropic</option>
+              </select>
+            </label>
+            <label>Модель:
+              <input type="text" id="ai-model" size="24" autocomplete="off" value="gpt-4.1-mini">
+            </label>
+            <label>API-ключ:
               <input type="password" id="ai-browser-key" size="35" autocomplete="off" spellcheck="false"
                      placeholder="Вставьте API-ключ">
             </label>
@@ -87,7 +96,7 @@
           <p class="hint" id="ai-key-status"></p>
           <p class="hint">
             Ключ сохраняется в этом браузере и доступен тому, кто пользуется этим профилем.
-            Его нужно указать отдельно на каждом компьютере. Запросы идут прямо в Anthropic,
+            Его нужно указать отдельно на каждом компьютере. Запросы идут прямо в выбранный сервис,
             без Cloudflare; ключ не попадает в файлы выгрузки.
           </p>
         </details>

@@ -4,7 +4,7 @@
 import { el, clear, num } from './dom.js';
 import { describeNormsDocument } from '../ai/norms-extract.js';
 import { describeSample as describeRegistrySample } from '../ai/registry-markup.js';
-import { isCustomEndpoint, hasBrowserApiKey } from '../ai/client.js';
+import { isCustomEndpoint, hasBrowserApiKey, getBrowserProvider, getBrowserModel, BROWSER_PROVIDERS } from '../ai/client.js';
 
 /** Блок «что уходит из браузера» — раскрывается по требованию. */
 function sampleBlock(sample, describe) {
@@ -98,7 +98,7 @@ export function renderAi(state, actions) {
   registryButton.disabled = !registryEntry || !state.ai.endpoint || state.ai.registry.status === 'running';
 
   if (hasBrowserApiKey()) {
-    result.append(el('p.hint', {}, 'ИИ: прямое подключение к Anthropic, ключ хранится в этом браузере.'));
+    result.append(el('p.hint', {}, `ИИ: ${BROWSER_PROVIDERS[getBrowserProvider()]}, ${getBrowserModel()}; прямое подключение, ключ хранится в этом браузере.`));
   } else if (isCustomEndpoint(state.ai.endpoint)) {
     result.append(el('p.hint', {}, `Используется свой прокси: ${state.ai.endpoint}`));
   }

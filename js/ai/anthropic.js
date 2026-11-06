@@ -6,12 +6,12 @@ import { describeSample } from './registry-markup.js';
 export const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
 export const ANTHROPIC_MODEL = 'claude-haiku-4-5-20251001';
 
-export function buildAnthropicRequest(payload) {
+export function buildAnthropicRequest(payload, model = ANTHROPIC_MODEL) {
   const norms = payload.task === 'norms-extract';
   if (!norms && payload.task !== 'registry-markup') throw new Error('Эта задача не поддерживает прямое подключение');
   const tool = norms ? EXTRACTION_TOOL : REGISTRY_TOOL;
   return {
-    model: ANTHROPIC_MODEL,
+    model,
     max_tokens: norms ? 32000 : 1024,
     system: norms ? EXTRACTION_SYSTEM : REGISTRY_SYSTEM,
     tools: [tool],

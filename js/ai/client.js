@@ -1,32 +1,63 @@
 // Два способа подключения: серверный прокси или ключ в текущем браузере.
 
-import { ANTHROPIC_URL, buildAnthropicRequest, readAnthropicResult } from './anthropic.js';
+import { ANTHROPIC_URL, ANTHROPIC_MODEL, buildAnthropicRequest, readAnthropicResult } from './anthropic.js';
+import { OPENAI_URL, OPENAI_MODEL, buildOpenAIRequest, readOpenAIResult } from './openai.js';
 
 const TIMEOUT = 40000;
 const ENDPOINT_KEY = 'tko-ioo.ai-endpoint.v1';
-const BROWSER_API_KEY = 'tko-ioo.anthropic-api-key.v1';
-let apiKeyMemory = null;
+const LEGACY_API_KEY = 'tko-ioo.anthropic-api-key.v1';
+const BROWSER_CONNECTION = 'tko-ioo.ai-connection.v2';
+let connectionMemory = null;
+export const BROWSER_PROVIDERS = { openai: 'OpenAI', anthropic: 'Anthropic' };
+export const DEFAULT_MODELS = { openai: OPENAI_MODEL, anthropic: ANTHROPIC_MODEL };
+
+function connection() {
+  if (connectionMemory !== null) return connectionMemory;
+  try {
+    const stored = localStorage.getItem(BROWSER_CONNECTION);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      if (Object.hasOwn(BROWSER_PROVIDERS, parsed.provider) && typeof parsed.key === 'string') {
+        return { provider: parsed.provider, key: parsed.key, model: parsed.model || DEFAULT_MODELS[parsed.provider] };
+      }
+    }
+    const legacy = localStorage.getItem(LEGACY_API_KEY);
+    if (legacy) {
+      const provider = legacy.startsWith('sk-ant-') ? 'anthropic' : 'openai';
+      return { provider, key: legacy, model: DEFAULT_MODELS[provider] };
+    }
+  } catch { /* Без хранилища работает настройка в памяти страницы. */ }
+  return { provider: 'openai', key: '', model: OPENAI_MODEL };
+}
 
 export function getBrowserApiKey() {
-  if (apiKeyMemory !== null) return apiKeyMemory;
-  try { return localStorage.getItem(BROWSER_API_KEY) || ''; }
-  catch { return ''; }
+  return connection().key;
 }
+
+export const getBrowserProvider = () => connection().provider;
+export const getBrowserModel = () => connection().model;
 
 export const hasBrowserApiKey = () => Boolean(getBrowserApiKey());
 
-export function validateBrowserApiKey(value) {
-  if (!value.trim()) return 'Введите API-ключ Anthropic';
+export function validateBrowserApiKey(value, provider, model) {
+  if (!value.trim()) return 'Введите API-ключ';
   if (/\s/.test(value.trim()) || value.trim().length > 2000) return 'Ключ должен быть одной строкой без пробелов';
+  if (provider && !Object.hasOwn(BROWSER_PROVIDERS, provider)) return 'Выберите OpenAI или Anthropic';
+  if (provider === 'openai' && value.trim().startsWith('sk-ant-')) return 'Это ключ Anthropic. Выберите Anthropic или вставьте ключ OpenAI.';
+  if (provider === 'anthropic' && !value.trim().startsWith('sk-ant-')) return 'Для этого ключа выберите OpenAI. Ключи Anthropic начинаются с sk-ant-.';
+  if (model !== undefined && !/^[a-zA-Z0-9._:-]{1,100}$/.test(model)) return 'Укажите имя модели без пробелов';
   return null;
 }
 
 /** Ключ остаётся на этом компьютере; не включается в файлы правил и URL. */
-export function setBrowserApiKey(value) {
-  apiKeyMemory = value.trim();
+export function setBrowserApiKey(value, provider, model) {
+  const key = value.trim();
+  provider ||= key ? (key.startsWith('sk-ant-') ? 'anthropic' : 'openai') : getBrowserProvider();
+  connectionMemory = { provider, key, model: model || DEFAULT_MODELS[provider] };
   try {
-    if (apiKeyMemory) localStorage.setItem(BROWSER_API_KEY, apiKeyMemory);
-    else localStorage.removeItem(BROWSER_API_KEY);
+    if (key) localStorage.setItem(BROWSER_CONNECTION, JSON.stringify(connectionMemory));
+    else localStorage.removeItem(BROWSER_CONNECTION);
+    localStorage.removeItem(LEGACY_API_KEY);
     return true;
   } catch {
     return false; // Прямое подключение работает до перезагрузки страницы.
@@ -87,26 +118,30 @@ export function validateEndpoint(url) {
 }
 
 /**
- * Выполняет задачу через прокси или непосредственно через Anthropic.
+ * Выполняет задачу через прокси или напрямую через выбранного провайдера.
  * @param {string} endpoint адрес прокси
  * @param {object} payload задача и исходный документ либо образец реестра
  * @returns {Promise<{result: object, usage: object, model: string}>}
  */
 async function request(endpoint, payload, timeout = TIMEOUT) {
-  const apiKey = getBrowserApiKey();
+  const { key: apiKey, provider, model } = connection();
+  const providerName = BROWSER_PROVIDERS[provider];
   const direct = Boolean(apiKey) && payload.task !== 'norms-markup';
-  const body = direct ? buildAnthropicRequest(payload) : payload;
+  const openai = provider === 'openai';
+  const body = direct ? (openai ? buildOpenAIRequest(payload, model) : buildAnthropicRequest(payload, model)) : payload;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
   try {
-    const response = await fetch(direct ? ANTHROPIC_URL : endpoint, {
+    const response = await fetch(direct ? (openai ? OPENAI_URL : ANTHROPIC_URL) : endpoint, {
       method: 'POST',
-      headers: direct ? {
+      headers: !direct ? { 'Content-Type': 'application/json' } : openai ? {
+        'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}`,
+      } : {
         'Content-Type': 'application/json',
         'x-api-key': apiKey,
         'anthropic-version': '2023-06-01',
         'anthropic-dangerous-direct-browser-access': 'true',
-      } : { 'Content-Type': 'application/json' },
+      },
       body: JSON.stringify(body),
       signal: controller.signal,
     });
@@ -121,8 +156,8 @@ async function request(endpoint, payload, timeout = TIMEOUT) {
       if (direct) {
         const message = data.error?.message || `HTTP ${response.status}`;
         const hint = response.status === 403
-          ? ' Проверьте доступ аккаунта и сети к Anthropic: запрос выполнен напрямую, без Cloudflare.' : '';
-        throw new Error(`Anthropic (${response.status}): ${message}.${hint}`);
+          ? ` Проверьте доступ аккаунта и сети к ${providerName}: запрос выполнен напрямую, без Cloudflare.` : '';
+        throw new Error(`${providerName} (${response.status}): ${message}.${hint}`);
       }
       if (payload.task === 'norms-extract' && data.error === 'Неизвестная задача') {
         throw new Error('Прокси ещё не поддерживает извлечение нормативов. Обновите Cloudflare Worker из папки worker.');
@@ -130,13 +165,13 @@ async function request(endpoint, payload, timeout = TIMEOUT) {
       const detail = detailMessage(data.detail);
       throw new Error((data.error || `Помощник ответил ошибкой (код ${response.status})`) + (detail ? `: ${detail}` : ''));
     }
-    if (direct) return readAnthropicResult(data, body.tool_choice.name);
+    if (direct) return openai ? readOpenAIResult(data, body.tool_choice.name) : readAnthropicResult(data, body.tool_choice.name);
     if (!data.result) throw new Error('Помощник не вернул результат');
     return data;
   } catch (error) {
     if (error.name === 'AbortError') throw new Error(`Помощник не ответил за ${timeout / 1000} секунд. Повторите обработку или разделите документ.`);
     if (direct && error instanceof TypeError) {
-      throw new Error('Не удалось напрямую подключиться к Anthropic. Проверьте доступ к API в этой сети и настройки браузера.');
+      throw new Error(`Не удалось напрямую подключиться к ${providerName}. Проверьте доступ к API в этой сети и настройки браузера.`);
     }
     throw error;
   } finally {
