@@ -145,7 +145,6 @@ export function validateExtractedNorms(fileName, answer, fallback = {}) {
       if (!category || !unitText || !sourceLocation || !sourceQuote) throw new Error('не указаны категория, расчётная единица или источник');
       const mass = measure(item.mass, MASS, 'масса');
       const volume = measure(item.volume, VOLUME, 'объём');
-      if (mass === null && volume === null) throw new Error('нет ни массы, ни объёма');
       entries.push({
         id: `n${index}`, name: context ? `${category} — ${context}` : category, category, context,
         unitText, basis: unitBasis(unitText) || 'other', mass, volume,
@@ -165,6 +164,12 @@ export function validateExtractedNorms(fileName, answer, fallback = {}) {
     groups.get(entry.table).count += 1;
   }
   const warnings = Array.isArray(answer.warnings) ? answer.warnings.map(clean).filter(Boolean) : [];
+  const withoutValues = entries.filter((entry) => entry.mass === null && entry.volume === null);
+  if (withoutValues.length) {
+    warnings.push(`В документе не указаны ни масса, ни объём для ${withoutValues.length} записей: `
+      + withoutValues.map((entry) => `${entry.name} (${entry.unitText})`).join('; ')
+      + '. Эти строки сохранены без значений, прочерки не заменены нулями.');
+  }
   const preview = {
     ...fallback, fileName, entries, tables: [...groups.values()], skipped: [],
     rawTables: fallback.rawTables || [], source: 'ИИ: извлечение нормативов', warnings,
@@ -172,6 +177,7 @@ export function validateExtractedNorms(fileName, answer, fallback = {}) {
   return {
     ok: true, problems: [], preview,
     summary: { count: entries.length, withMass: entries.filter((entry) => entry.mass !== null).length,
-      withVolume: entries.filter((entry) => entry.volume !== null).length, warnings, reason: clean(answer.reason) },
+      withVolume: entries.filter((entry) => entry.volume !== null).length,
+      withoutValues: withoutValues.length, warnings, reason: clean(answer.reason) },
   };
 }

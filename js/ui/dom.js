@@ -31,7 +31,7 @@ export function $(selector) {
 }
 
 const numberFormat = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 });
-const preciseFormat = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 5 });
+const preciseFormat = new Intl.NumberFormat('ru-RU', { maximumSignificantDigits: 15 });
 
 /** Число в русском формате; пустое значение — прочерк. */
 export function num(value, precise = false) {

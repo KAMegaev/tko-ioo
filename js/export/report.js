@@ -203,6 +203,7 @@ function normsTable(norms) {
     'Файл',
     'Место в документе',
     'Выдержка из документа',
+    'Статус значений',
   ];
   const rows = norms.entries.map((entry) => [
     entry.name,
@@ -214,6 +215,7 @@ function normsTable(norms) {
     entry.file,
     entry.sourceLocation || '',
     entry.sourceQuote || '',
+    entry.mass === null && entry.volume === null ? 'Не указаны в документе' : 'Указаны',
   ]);
   return [header, ...rows];
 }

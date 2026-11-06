@@ -48,7 +48,7 @@ function normsProposal(proposal, actions) {
     el('div.title', {}, 'Нормативы извлечены из полного документа'),
     el('div.detail', {}, summary.reason),
     el('ul.detail', {}, [
-      el('li', {}, `Всего нормативов: ${summary.count}`),
+      el('li', {}, `Всего записей: ${summary.count}`),
       el('li', {}, `Из них с массой: ${summary.withMass}, с объёмом: ${summary.withVolume}`),
       ...summary.warnings.map((warning) => el('li.loss', {}, warning)),
     ]),
@@ -162,13 +162,16 @@ export function renderAi(state, actions) {
           el('th', {}, 'Расчётная единица'),
           el('th.num', {}, 'Масса, кг/год'),
           el('th.num', {}, 'Объём, м³/год'),
+          el('th', {}, 'Статус значений'),
           el('th', {}, 'Источник в документе'),
         ])),
-        el('tbody', {}, proposal.preview.entries.map((entry) => el('tr', {}, [
+        el('tbody', {}, proposal.preview.entries.map((entry) => el(
+          entry.mass === null && entry.volume === null ? 'tr.row-attention' : 'tr', {}, [
           el('td', {}, entry.name),
           el('td', {}, entry.unitText),
           el('td.num', {}, num(entry.mass, true)),
           el('td.num', {}, num(entry.volume, true)),
+          el('td', {}, entry.mass === null && entry.volume === null ? 'Не указаны в документе' : 'Указаны'),
           el('td', { title: entry.sourceQuote }, entry.sourceLocation),
         ]))),
       ])),

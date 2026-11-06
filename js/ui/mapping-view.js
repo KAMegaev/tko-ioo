@@ -25,7 +25,8 @@ function normSelect(mapping, norms, onChange) {
 
   const candidates = mapping.candidates || [];
   const byId = new Map(norms.map((entry) => [entry.id, entry]));
-  const label = (entry) => `${entry.name} (${entry.unitText || BASIS_LABELS[entry.basis] || entry.basis || '—'})`;
+  const label = (entry) => `${entry.name} (${entry.unitText || BASIS_LABELS[entry.basis] || entry.basis || '—'})`
+    + (entry.mass === null && entry.volume === null ? ' — значения не указаны' : '');
   const suggestedIds = new Set(candidates.map((item) => item.id));
   if (candidates.length) {
     const group = el('optgroup', { label: 'Похожие наименования' });

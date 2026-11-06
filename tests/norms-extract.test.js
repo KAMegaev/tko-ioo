@@ -6,6 +6,7 @@ import { EXTRACTION_LIMITS, validateNormsDocument } from '../js/ai/norms-contrac
 import { requestNormsExtraction } from '../js/ai/client.js';
 import { buildNormsWorkbook } from '../js/export/report.js';
 import worker from '../worker/index.js';
+import { num } from '../js/ui/dom.js';
 
 const measure = (value, unit, period = 'year', quantity = 1) => ({ value, unit, period, quantity });
 const entry = (extra = {}) => ({
@@ -83,6 +84,14 @@ test('тонны Кузбасса, периоды и количество рас
   assert.ok(Math.abs(checked.preview.entries[2].mass - 0.024) < 1e-10);
 });
 
+test('малый норматив из постановления РИ отображается точно, а не как ноль', () => {
+  assert.equal(num(4.233e-6, true), '0,000004233');
+  assert.equal(num(0.0002046, true), '0,0002046');
+  assert.equal(num(260.36578, true), '260,36578');
+  assert.equal(num(0, true), '0');
+  assert.equal(num(null, true), '—');
+});
+
 test('территориальные варианты и одинаковые категории с разными единицами не теряются', () => {
   const checked = validateExtractedNorms('Приказ.pdf', answer([
     entry({ context: 'Городские населённые пункты' }),
@@ -111,7 +120,7 @@ test('ошибочная запись отклоняет весь набор и 
     entry({ mass: measure(-1, 'kg') }), entry({ volume: measure(1, 'kg') }),
     entry({ mass: measure(1, 'kg', 'season') }), entry({ mass: measure(1, 'kg', 'year', 0) }),
     entry({ mass: measure('2', 'kg') }), entry({ mass: measure(NaN, 'kg') }),
-    entry({ mass: null, volume: null }), entry({ unit: '' }), entry({ source: null }), null,
+    entry({ unit: '' }), entry({ source: null }), null,
   ];
   for (const bad of invalid) {
     assert.equal(validateExtractedNorms('Файл', answer([entry(), bad]), fallback).ok, false);
@@ -123,6 +132,42 @@ test('ошибочная запись отклоняет весь набор и 
   const zero = validateExtractedNorms('Файл', answer([entry({ mass: measure(0, 'kg'), volume: null })]));
   assert.equal(zero.ok, true);
   assert.equal(zero.preview.entries[0].mass, 0);
+});
+
+test('прочерки в трёх строках постановления РИ № 184 не отклоняют остальные нормативы', () => {
+  // 39 категорий + 5 дополнительных расчётных единиц; индексы из реального ответа ИИ.
+  const rows = Array.from({ length: 44 }, (_, i) => entry({ name: `Категория ${i + 1}` }));
+  for (const [index, name] of [[14, 'Палатки, киоски'], [39, 'Общежития'], [41, 'Садоводческие кооперативы']]) {
+    rows[index] = entry({ name, unit: index === 39 ? '1 койко-место' : '1 кв. метр общей площади',
+      mass: null, volume: null, source: { location: `Приложение, запись ${index + 1}`, quote: `${name} | - | -` } });
+  }
+  rows[19] = entry({ name: 'Автостоянки', unit: '1 машино-место',
+    mass: measure(0, 'kg'), volume: measure(0, 'm3'),
+    source: { location: 'Страница 3, строка 16', quote: 'Автостоянки | 1 машино-место | 0 | 0' } });
+  rows[30] = entry({ name: 'Туристические базы', unit: '1 кв. метр общей площади',
+    mass: measure(0.0002046, 'kg'), volume: measure(4.233e-6, 'm3'),
+    source: { location: 'Страница 3, строка 27', quote: 'Туристические базы | 0,0002046 | 4,233E-06' } });
+  const checked = validateExtractedNorms('Постановление РИ № 184.pdf', answer(rows));
+  assert.equal(checked.ok, true);
+  assert.equal(checked.preview.entries.length, 44);
+  assert.equal(checked.summary.withMass, 41);
+  assert.equal(checked.summary.withVolume, 41);
+  assert.equal(checked.summary.withoutValues, 3);
+  assert.equal(checked.preview.entries[14].mass, null);
+  assert.equal(checked.preview.entries[14].volume, null);
+  assert.equal(checked.preview.entries[19].mass, 0);
+  assert.equal(checked.preview.entries[19].volume, 0);
+  assert.equal(checked.preview.entries[30].volume, 0.000004233);
+  assert.match(checked.summary.warnings.join(' '), /Палатки, киоски.*Общежития.*Садоводческие кооперативы/);
+  const book = libs.XLSX.read(buildNormsWorkbook(checked.preview, libs.XLSX), { type: 'array' });
+  const grid = libs.XLSX.utils.sheet_to_json(book.Sheets['Нормативы'], { header: 1, defval: null });
+  assert.equal(grid.length, 45);
+  assert.equal(grid[15][2], '');
+  assert.equal(grid[15][3], '');
+  assert.equal(grid[15][9], 'Не указаны в документе');
+  assert.equal(grid[20][2], 0);
+  assert.equal(grid[20][3], 0);
+  assert.equal(grid[20][9], 'Указаны');
 });
 
 test('справочник Excel доступен без шаблона и реестра, сохраняет единицы и источник', () => {
