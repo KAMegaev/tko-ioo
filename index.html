@@ -59,7 +59,7 @@
       <button type="button" class="button small" id="restart">Начать заново</button>
     </p>
 
-    <div id="ai-block" class="ai-block" hidden>
+    <div id="ai-block" class="ai-block">
       <h3>ИИ-помощник</h3>
       <p class="hint">
         ИИ получает документ нормативов целиком и извлекает все категории,
@@ -74,6 +74,23 @@
         <button type="button" class="button small" id="ai-run" disabled>Извлечь нормативы с ИИ</button>
         <button type="button" class="button small" id="ai-run-registry" disabled>Проверить реестр</button>
         <span class="spacer"></span>
+        <details class="endpoint-settings" id="browser-key-settings">
+          <summary>API-ключ в браузере</summary>
+          <div class="toolbar">
+            <label>Ключ Anthropic:
+              <input type="password" id="ai-browser-key" size="35" autocomplete="off" spellcheck="false"
+                     placeholder="Вставьте API-ключ">
+            </label>
+            <button type="button" class="button small" id="ai-key-save">Сохранить и подключаться напрямую</button>
+            <button type="button" class="button small" id="ai-key-remove">Удалить ключ и использовать прокси</button>
+          </div>
+          <p class="hint" id="ai-key-status"></p>
+          <p class="hint">
+            Ключ сохраняется в этом браузере и доступен тому, кто пользуется этим профилем.
+            Его нужно указать отдельно на каждом компьютере. Запросы идут прямо в Anthropic,
+            без Cloudflare; ключ не попадает в файлы выгрузки.
+          </p>
+        </details>
         <details class="endpoint-settings">
           <summary>Свой прокси</summary>
           <div class="toolbar">

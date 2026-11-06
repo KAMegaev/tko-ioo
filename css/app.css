@@ -162,7 +162,7 @@ code { background: var(--bg); padding: 1px 5px; border-radius: 4px; font-size: 1
 }
 .stats { color: var(--muted); font-size: 13px; }
 
-select, input[type="search"], input[type="text"], input[type="number"] {
+select, input[type="search"], input[type="text"], input[type="number"], input[type="password"] {
   font: inherit;
   font-size: 13.5px;
   padding: 5px 7px;
@@ -368,7 +368,9 @@ pre.sample {
 }
 .ai-block li.loss { color: var(--error); }
 .ai-block ul.detail ul { margin: 2px 0 4px; padding-left: 18px; color: var(--muted); }
-.endpoint-settings { font-size: 13px; }
+.endpoint-settings { font-size: 13px; max-width: 100%; }
 .endpoint-settings summary { cursor: pointer; color: var(--muted); }
 .endpoint-settings .toolbar { margin: 8px 0 0; }
 .endpoint-settings .hint { margin: 0; }
+.endpoint-settings label { max-width: 100%; }
+.endpoint-settings .button { white-space: normal; }

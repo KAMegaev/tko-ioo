@@ -4,7 +4,7 @@
 import { el, clear, num } from './dom.js';
 import { describeNormsDocument } from '../ai/norms-extract.js';
 import { describeSample as describeRegistrySample } from '../ai/registry-markup.js';
-import { isCustomEndpoint } from '../ai/client.js';
+import { isCustomEndpoint, hasBrowserApiKey } from '../ai/client.js';
 
 /** Блок «что уходит из браузера» — раскрывается по требованию. */
 function sampleBlock(sample, describe) {
@@ -93,12 +93,13 @@ export function renderAi(state, actions) {
 
   const registryEntry = state.files.find((item) => item.kind === 'registry' && item.buffer);
   const normsEntry = state.files.find((item) => item.kind === 'norms' && item.buffer);
-  block.hidden = !normsEntry && !registryEntry;
+  block.hidden = false; // Подключение можно настроить до загрузки файлов.
   normsButton.disabled = !normsEntry || !state.ai.endpoint || state.ai.norms.status === 'running';
   registryButton.disabled = !registryEntry || !state.ai.endpoint || state.ai.registry.status === 'running';
-  if (block.hidden) return;
 
-  if (isCustomEndpoint(state.ai.endpoint)) {
+  if (hasBrowserApiKey()) {
+    result.append(el('p.hint', {}, 'ИИ: прямое подключение к Anthropic, ключ хранится в этом браузере.'));
+  } else if (isCustomEndpoint(state.ai.endpoint)) {
     result.append(el('p.hint', {}, `Используется свой прокси: ${state.ai.endpoint}`));
   }
 

@@ -18,6 +18,7 @@ import { renderAi } from './ui/ai-view.js';
 import {
   getEndpoint, setEndpoint, validateEndpoint, requestNormsExtraction, requestRegistryMarkup,
   isCustomEndpoint,
+  hasBrowserApiKey, setBrowserApiKey, validateBrowserApiKey,
 } from './ai/client.js';
 import { prepareNormsDocument, validateExtractedNorms } from './ai/norms-extract.js';
 import { NORMS_EXTENSIONS } from './ai/norms-contract.js';
@@ -474,6 +475,22 @@ const actions = {
     renderAi(state, actions);
   },
 
+  aiSaveBrowserKey(value) {
+    const problem = validateBrowserApiKey(value);
+    if (problem) { toast(problem, 'error'); return false; }
+    const persisted = setBrowserApiKey(value);
+    toast(persisted ? 'Прямое подключение включено, ключ сохранён в этом браузере'
+      : 'Прямое подключение включено. Браузер не разрешает сохранить ключ после перезагрузки.', 'ok');
+    renderAi(state, actions);
+    return true;
+  },
+
+  aiRemoveBrowserKey() {
+    setBrowserApiKey('');
+    toast('Ключ удалён из браузера. Используется серверный прокси.', 'ok');
+    renderAi(state, actions);
+  },
+
   downloadNorms() {
     if (!state.norms?.entries.length) return;
     const data = buildNormsWorkbook(state.norms, libs.XLSX);
@@ -797,6 +814,23 @@ function bind() {
   const endpointInput = $('#ai-endpoint');
   endpointInput.value = state.ai.endpoint;
   $('#ai-save').addEventListener('click', () => actions.aiSaveEndpoint(endpointInput.value.trim()));
+  const keyInput = $('#ai-browser-key');
+  const updateKeyControls = () => {
+    const enabled = hasBrowserApiKey();
+    $('#ai-key-status').textContent = enabled ? 'Включено прямое подключение к Anthropic.' : 'Ключ не задан. Используется серверный прокси.';
+    $('#ai-key-remove').disabled = !enabled;
+    keyInput.placeholder = enabled ? 'Ключ сохранён. Введите новый для замены.' : 'Вставьте API-ключ';
+  };
+  updateKeyControls();
+  $('#ai-key-save').addEventListener('click', () => {
+    if (actions.aiSaveBrowserKey(keyInput.value)) keyInput.value = '';
+    updateKeyControls();
+  });
+  $('#ai-key-remove').addEventListener('click', () => {
+    actions.aiRemoveBrowserKey();
+    keyInput.value = '';
+    updateKeyControls();
+  });
   $('#ai-run').addEventListener('click', () => actions.aiRun());
   $('#ai-run-registry').addEventListener('click', () => actions.aiRunRegistry());
 
@@ -833,5 +867,6 @@ function checkLibraries() {
 state.ai.endpoint = getEndpoint();
 if (checkLibraries()) {
   bind();
+  renderAi(state, actions);
   updateSteps();
 }

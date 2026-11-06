@@ -1,7 +1,47 @@
-// Обращение к прокси помощника. Ключа в браузере нет — он хранится на прокси.
+// Два способа подключения: серверный прокси или ключ в текущем браузере.
+
+import { ANTHROPIC_URL, buildAnthropicRequest, readAnthropicResult } from './anthropic.js';
 
 const TIMEOUT = 40000;
 const ENDPOINT_KEY = 'tko-ioo.ai-endpoint.v1';
+const BROWSER_API_KEY = 'tko-ioo.anthropic-api-key.v1';
+let apiKeyMemory = null;
+
+export function getBrowserApiKey() {
+  if (apiKeyMemory !== null) return apiKeyMemory;
+  try { return localStorage.getItem(BROWSER_API_KEY) || ''; }
+  catch { return ''; }
+}
+
+export const hasBrowserApiKey = () => Boolean(getBrowserApiKey());
+
+export function validateBrowserApiKey(value) {
+  if (!value.trim()) return 'Введите API-ключ Anthropic';
+  if (/\s/.test(value.trim()) || value.trim().length > 2000) return 'Ключ должен быть одной строкой без пробелов';
+  return null;
+}
+
+/** Ключ остаётся на этом компьютере; не включается в файлы правил и URL. */
+export function setBrowserApiKey(value) {
+  apiKeyMemory = value.trim();
+  try {
+    if (apiKeyMemory) localStorage.setItem(BROWSER_API_KEY, apiKeyMemory);
+    else localStorage.removeItem(BROWSER_API_KEY);
+    return true;
+  } catch {
+    return false; // Прямое подключение работает до перезагрузки страницы.
+  }
+}
+
+function detailMessage(detail) {
+  if (typeof detail !== 'string') return '';
+  try {
+    const parsed = JSON.parse(detail);
+    return parsed.error?.message || parsed.message || '';
+  } catch {
+    return detail.startsWith('<') ? '' : detail.slice(0, 300);
+  }
+}
 
 /**
  * Прокси, развёрнутый для этого приложения. Помощник работает сразу,
@@ -47,20 +87,27 @@ export function validateEndpoint(url) {
 }
 
 /**
- * Запрашивает разметку у прокси.
+ * Выполняет задачу через прокси или непосредственно через Anthropic.
  * @param {string} endpoint адрес прокси
- * @param {string} task 'norms-markup' или 'registry-markup'
- * @param {Array} tables образец: таблицы приказа либо листы книги
+ * @param {object} payload задача и исходный документ либо образец реестра
  * @returns {Promise<{result: object, usage: object, model: string}>}
  */
 async function request(endpoint, payload, timeout = TIMEOUT) {
+  const apiKey = getBrowserApiKey();
+  const direct = Boolean(apiKey) && payload.task !== 'norms-markup';
+  const body = direct ? buildAnthropicRequest(payload) : payload;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
   try {
-    const response = await fetch(endpoint, {
+    const response = await fetch(direct ? ANTHROPIC_URL : endpoint, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      headers: direct ? {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      } : { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
       signal: controller.signal,
     });
     let data;
@@ -71,15 +118,26 @@ async function request(endpoint, payload, timeout = TIMEOUT) {
       throw new Error(`Помощник ответил неразборчиво (код ${response.status})`);
     }
     if (!response.ok || data.error) {
+      if (direct) {
+        const message = data.error?.message || `HTTP ${response.status}`;
+        const hint = response.status === 403
+          ? ' Проверьте доступ аккаунта и сети к Anthropic: запрос выполнен напрямую, без Cloudflare.' : '';
+        throw new Error(`Anthropic (${response.status}): ${message}.${hint}`);
+      }
       if (payload.task === 'norms-extract' && data.error === 'Неизвестная задача') {
         throw new Error('Прокси ещё не поддерживает извлечение нормативов. Обновите Cloudflare Worker из папки worker.');
       }
-      throw new Error(data.error || `Помощник ответил ошибкой (код ${response.status})`);
+      const detail = detailMessage(data.detail);
+      throw new Error((data.error || `Помощник ответил ошибкой (код ${response.status})`) + (detail ? `: ${detail}` : ''));
     }
+    if (direct) return readAnthropicResult(data, body.tool_choice.name);
     if (!data.result) throw new Error('Помощник не вернул результат');
     return data;
   } catch (error) {
     if (error.name === 'AbortError') throw new Error(`Помощник не ответил за ${timeout / 1000} секунд. Повторите обработку или разделите документ.`);
+    if (direct && error instanceof TypeError) {
+      throw new Error('Не удалось напрямую подключиться к Anthropic. Проверьте доступ к API в этой сети и настройки браузера.');
+    }
     throw error;
   } finally {
     clearTimeout(timer);

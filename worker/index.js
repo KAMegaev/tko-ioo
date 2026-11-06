@@ -5,6 +5,7 @@
 
 import { EXTRACTION_LIMITS } from '../js/ai/norms-contract.js';
 import { EXTRACTION_SYSTEM, EXTRACTION_TOOL, extractionContent } from './norms-extract.js';
+import { REGISTRY_SYSTEM, REGISTRY_TOOL } from '../js/ai/registry-prompt.js';
 
 const ALLOWED_ORIGINS = [
   'https://kamegaev.github.io',
@@ -87,52 +88,6 @@ const NORMS_TOOL = {
       reason: { type: 'string' },
     },
     required: ['tables', 'confidence', 'reason'],
-  },
-};
-
-const REGISTRY_SYSTEM = `Ты размечаешь выгрузку реестра источников образования отходов (ИОО) —
-таблицу Excel, где каждая строка описывает один источник образования ТКО.
-
-Тебе дают листы книги: название листа и первые строки каждого.
-Нужно указать лист с данными, строку заголовка и роли столбцов.
-
-Роли столбцов:
-- category — наименование категории потребителя («Индивидуальные жилые дома», «Гостиницы»);
-- units — количество расчётных единиц источника: число проживающих, квадратные метры,
-  места. Столбца может не быть: тогда укажи -1, не подставляй вместо него другой
-  числовой столбец;
-- zone — зона деятельности регионального оператора;
-- municipality — муниципальное образование, городской или муниципальный округ, район;
-- unitName — единица измерения расчётных единиц, если она вынесена отдельным столбцом.
-
-Правила:
-- Нумерация строк и столбцов начинается с нуля и совпадает с присланной.
-- headerRow — номер строки с названиями столбцов, данные идут после неё.
-- Роль, которой в таблице нет, отмечай -1. Обязателен только category.
-- Не путай количество расчётных единиц с порядковым номером строки или с кодом объекта.
-- Если подходящего листа нет, укажи sheet -1 и объясни причину в reason.
-- confidence — насколько ты уверен; reason — одно-два предложения по-русски.
-
-Отвечай только вызовом инструмента.`;
-
-const REGISTRY_TOOL = {
-  name: 'razmetka_reestra',
-  description: 'Разметка выгрузки реестра ИОО',
-  input_schema: {
-    type: 'object',
-    properties: {
-      sheet: { type: 'integer', description: 'Номер листа с данными, -1 если подходящего нет' },
-      headerRow: { type: 'integer', description: 'Номер строки с названиями столбцов' },
-      category: { type: 'integer', description: 'Столбец категории потребителя' },
-      units: { type: 'integer', description: 'Столбец количества расчётных единиц, -1 если отсутствует' },
-      zone: { type: 'integer', description: 'Столбец зоны деятельности, -1 если отсутствует' },
-      municipality: { type: 'integer', description: 'Столбец муниципального образования, -1 если отсутствует' },
-      unitName: { type: 'integer', description: 'Столбец единицы измерения, -1 если отсутствует' },
-      confidence: { type: 'number' },
-      reason: { type: 'string' },
-    },
-    required: ['sheet', 'headerRow', 'category', 'units', 'zone', 'municipality', 'unitName',
-      'confidence', 'reason'],
   },
 };
 
