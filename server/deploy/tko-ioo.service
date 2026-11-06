@@ -1,0 +1,29 @@
+[Unit]
+Description=TKO web application and OpenAI backend
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=tko
+Group=tko
+WorkingDirectory=/opt/tko-ioo
+EnvironmentFile=/etc/tko-ioo.env
+# Отдельный Node.js, чтобы не менять среду существующего агента.
+ExecStart=/opt/tko-node/bin/node /opt/tko-ioo/server/index.js
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=310
+NoNewPrivileges=true
+PrivateTmp=true
+StateDirectory=tko-ioo
+StateDirectoryMode=0700
+ProtectSystem=strict
+ProtectHome=true
+RestrictSUIDSGID=true
+UMask=0077
+MemoryMax=512M
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target

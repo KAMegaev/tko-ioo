@@ -19,7 +19,7 @@ import {
   getEndpoint, setEndpoint, validateEndpoint, requestNormsExtraction, requestRegistryMarkup,
   isCustomEndpoint,
   hasBrowserApiKey, setBrowserApiKey, validateBrowserApiKey,
-  getBrowserProvider, getBrowserModel, BROWSER_PROVIDERS, DEFAULT_MODELS,
+  getBrowserProvider, getBrowserModel, BROWSER_PROVIDERS, DEFAULT_MODELS, isServerMode,
 } from './ai/client.js';
 import { prepareNormsDocument, validateExtractedNorms } from './ai/norms-extract.js';
 import { NORMS_EXTENSIONS } from './ai/norms-contract.js';
@@ -813,6 +813,10 @@ function bind() {
     downloadReport().catch((error) => toast(error.message, 'error'));
   });
   const endpointInput = $('#ai-endpoint');
+  if (isServerMode()) {
+    $('#browser-key-settings').hidden = true;
+    endpointInput.closest('details').hidden = true;
+  }
   endpointInput.value = state.ai.endpoint;
   $('#ai-save').addEventListener('click', () => actions.aiSaveEndpoint(endpointInput.value.trim()));
   const keyInput = $('#ai-browser-key');

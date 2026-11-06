@@ -4,7 +4,7 @@
 import { el, clear, num } from './dom.js';
 import { describeNormsDocument } from '../ai/norms-extract.js';
 import { describeSample as describeRegistrySample } from '../ai/registry-markup.js';
-import { isCustomEndpoint, hasBrowserApiKey, getBrowserProvider, getBrowserModel, BROWSER_PROVIDERS } from '../ai/client.js';
+import { isCustomEndpoint, hasBrowserApiKey, getBrowserProvider, getBrowserModel, BROWSER_PROVIDERS, isServerMode } from '../ai/client.js';
 
 /** Блок «что уходит из браузера» — раскрывается по требованию. */
 function sampleBlock(sample, describe) {
@@ -97,7 +97,9 @@ export function renderAi(state, actions) {
   normsButton.disabled = !normsEntry || !state.ai.endpoint || state.ai.norms.status === 'running';
   registryButton.disabled = !registryEntry || !state.ai.endpoint || state.ai.registry.status === 'running';
 
-  if (hasBrowserApiKey()) {
+  if (isServerMode()) {
+    result.append(el('p.hint', {}, `ИИ: OpenAI через сервер сайта, модель ${getBrowserModel()}. API-ключ хранится на сервере.`));
+  } else if (hasBrowserApiKey()) {
     result.append(el('p.hint', {}, `ИИ: ${BROWSER_PROVIDERS[getBrowserProvider()]}, ${getBrowserModel()}; прямое подключение, ключ хранится в этом браузере.`));
   } else if (isCustomEndpoint(state.ai.endpoint)) {
     result.append(el('p.hint', {}, `Используется свой прокси: ${state.ai.endpoint}`));

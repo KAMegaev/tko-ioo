@@ -10,6 +10,8 @@ const BROWSER_CONNECTION = 'tko-ioo.ai-connection.v2';
 let connectionMemory = null;
 export const BROWSER_PROVIDERS = { openai: 'OpenAI', anthropic: 'Anthropic' };
 export const DEFAULT_MODELS = { openai: OPENAI_MODEL, anthropic: ANTHROPIC_MODEL };
+export const isServerMode = () => globalThis.TKO_RUNTIME?.serverMode === true;
+const serverConnection = () => ({ key: '', provider: 'openai', model: globalThis.TKO_RUNTIME?.model || OPENAI_MODEL });
 
 function connection() {
   if (connectionMemory !== null) return connectionMemory;
@@ -31,11 +33,12 @@ function connection() {
 }
 
 export function getBrowserApiKey() {
+  if (isServerMode()) return '';
   return connection().key;
 }
 
-export const getBrowserProvider = () => connection().provider;
-export const getBrowserModel = () => connection().model;
+export const getBrowserProvider = () => isServerMode() ? 'openai' : connection().provider;
+export const getBrowserModel = () => isServerMode() ? serverConnection().model : connection().model;
 
 export const hasBrowserApiKey = () => Boolean(getBrowserApiKey());
 
@@ -51,6 +54,7 @@ export function validateBrowserApiKey(value, provider, model) {
 
 /** Ключ остаётся на этом компьютере; не включается в файлы правил и URL. */
 export function setBrowserApiKey(value, provider, model) {
+  if (isServerMode()) throw new Error('На этом сайте API-ключ настраивается только на сервере');
   const key = value.trim();
   provider ||= key ? (key.startsWith('sk-ant-') ? 'anthropic' : 'openai') : getBrowserProvider();
   connectionMemory = { provider, key, model: model || DEFAULT_MODELS[provider] };
@@ -82,6 +86,7 @@ export const DEFAULT_ENDPOINT = 'https://tko-ioo-ai.kamegaev.workers.dev';
 
 /** Действующий адрес прокси: заданный пользователем либо встроенный. */
 export function getEndpoint() {
+  if (isServerMode()) return '/api/ai';
   try {
     return localStorage.getItem(ENDPOINT_KEY) || DEFAULT_ENDPOINT;
   } catch {
@@ -95,6 +100,7 @@ export function isCustomEndpoint(url) {
 }
 
 export function setEndpoint(url) {
+  if (isServerMode()) return;
   try {
     if (url) localStorage.setItem(ENDPOINT_KEY, url);
     else localStorage.removeItem(ENDPOINT_KEY);
@@ -124,7 +130,8 @@ export function validateEndpoint(url) {
  * @returns {Promise<{result: object, usage: object, model: string}>}
  */
 async function request(endpoint, payload, timeout = TIMEOUT) {
-  const { key: apiKey, provider, model } = connection();
+  if (isServerMode()) endpoint = '/api/ai';
+  const { key: apiKey, provider, model } = isServerMode() ? serverConnection() : connection();
   const providerName = BROWSER_PROVIDERS[provider];
   const direct = Boolean(apiKey) && payload.task !== 'norms-markup';
   const openai = provider === 'openai';
