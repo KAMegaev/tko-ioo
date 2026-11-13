@@ -193,7 +193,8 @@ python3 -m http.server 8000
 по SSH. При ошибке запуска сервер возвращает предыдущую версию. Первичная
 настройка доступа и GitHub Secrets: [server/deploy/README.md](server/deploy/README.md).
 Рабочий процесс: `.github/workflows/tests.yml`; доступен ручной запуск из Actions.
-Публикация на GitHub Pages отключается отдельным job этого workflow.
+Workflow публикации GitHub Pages удалён. Уже опубликованный старый сайт снимается
+однократно через Settings → Pages → Unpublish site.
 
 ## О зависимостях
 

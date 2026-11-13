@@ -92,13 +92,12 @@ workflow актуальной `main` или запустить его повто
 
 ## GitHub Pages
 
-Workflow публикации Pages удалён. Job **«Отключить GitHub Pages»** после тестов
-на `main` вызывает официальный API удаления сайта Pages. Повторный запуск
-без уже опубликованного сайта считается успешным. Деплой VPS независим от этого job.
-
-Если GitHub отклоняет отключение из-за прав токена или политики организации,
-открыть https://github.com/KAMegaev/tko-ioo/settings/pages и нажать
-**Unpublish site**. Удалять репозиторий не нужно.
+Workflow публикации Pages удалён. Чтобы снять уже опубликованный старый сайт,
+однократно открыть https://github.com/KAMegaev/tko-ioo/settings/pages и нажать
+**Unpublish site**. Удалять репозиторий не нужно. Обычный `GITHUB_TOKEN` Actions
+не может выполнить это действие: GitHub требует также административное право
+и возвращает `403 Resource not accessible by integration`. Для деплоя VPS
+повышенные права GitHub не нужны, workflow имеет только `contents: read`.
 
 ## Диагностика
 
