@@ -187,12 +187,13 @@ python3 -m http.server 8000
 
 ## Публикация
 
-Сайт: **https://kamegaev.github.io/tko-ioo/**
+Сайт: **https://tko.megaev.ru**
 
-Публикуется на GitHub Pages рабочим процессом `.github/workflows/pages.yml`
-при изменениях в `main`; можно запустить и вручную из вкладки Actions.
-Публикация возможна только с `main`: окружение `github-pages` по умолчанию
-не пускает остальные ветки.
+Изменения в `main` проходят тесты в GitHub Actions, затем публикуются на VPS
+по SSH. При ошибке запуска сервер возвращает предыдущую версию. Первичная
+настройка доступа и GitHub Secrets: [server/deploy/README.md](server/deploy/README.md).
+Рабочий процесс: `.github/workflows/tests.yml`; доступен ручной запуск из Actions.
+Публикация на GitHub Pages отключается отдельным job этого workflow.
 
 ## О зависимостях
 

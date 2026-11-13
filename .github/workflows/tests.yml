@@ -1,9 +1,13 @@
-name: Тесты
+name: Тесты и деплой на VPS
 
 on:
   push:
     branches: ['**']
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   test:
@@ -15,3 +19,87 @@ jobs:
           node-version: '22'
       - run: npm install
       - run: npm test
+
+  unpublish-pages:
+    name: Отключить GitHub Pages
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            try {
+              await github.request('DELETE /repos/{owner}/{repo}/pages', context.repo);
+              core.info('GitHub Pages отключён. Сайт работает на https://tko.megaev.ru');
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              core.info('GitHub Pages уже отключён.');
+            }
+
+  ssh-config:
+    name: Готовность SSH-деплоя
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      ready: ${{ steps.config.outputs.ready }}
+    steps:
+      - name: Проверить настройки SSH
+        id: config
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          if [[ -z "$VPS_SSH_KEY" || -z "$VPS_KNOWN_HOSTS" ]]; then
+            echo 'ready=false' >> "$GITHUB_OUTPUT"
+            echo '::notice::Добавьте VPS_SSH_KEY и VPS_KNOWN_HOSTS в Secrets репозитория, затем запустите workflow вручную.'
+            echo 'Деплой ещё не настроен: нужны Secrets VPS_SSH_KEY и VPS_KNOWN_HOSTS. Инструкция: server/deploy/README.md' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          echo 'ready=true' >> "$GITHUB_OUTPUT"
+
+  deploy:
+    name: Деплой на tko.megaev.ru
+    needs: [test, ssh-config]
+    if: github.ref == 'refs/heads/main' && needs.ssh-config.outputs.ready == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: tko-vps-production
+      cancel-in-progress: false
+    environment:
+      name: production
+      url: https://tko.megaev.ru
+    steps:
+      - name: Подключиться к VPS и обновить проверенный коммит
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          umask 077
+          ssh_dir=$(mktemp -d "$RUNNER_TEMP/tko-ssh.XXXXXX")
+          trap 'rm -rf -- "$ssh_dir"' EXIT
+          printf '%s\n' "$VPS_SSH_KEY" > "$ssh_dir/key"
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
+          ssh-keygen -y -P '' -f "$ssh_dir/key" > /dev/null
+          printf '%s\n' "$GITHUB_SHA" | ssh -T \
+            -i "$ssh_dir/key" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$ssh_dir/known_hosts" \
+            -o ConnectTimeout=20 \
+            -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=30 \
+            tko-deploy@185.200.179.49
+
+      - name: Проверить HTTPS после деплоя
+        run: |
+          set -euo pipefail
+          test "$(curl --fail --silent --show-error --max-time 30 https://tko.megaev.ru/healthz)" = '{"status":"ok"}'
+          curl --fail --silent --show-error --max-time 30 https://tko.megaev.ru/js/runtime-config.js | grep -q 'serverMode.*true'
+          echo "Опубликован коммит $GITHUB_SHA: https://tko.megaev.ru" >> "$GITHUB_STEP_SUMMARY"
