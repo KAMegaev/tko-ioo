@@ -1,6 +1,6 @@
 # Альтернатива Nginx, если HTTPS на сервере уже обслуживает Caddy.
 # Добавить отдельным блоком в существующую конфигурацию после проверки.
-tko.megaev.ru {
+ioo.megaev.ru {
     reverse_proxy 127.0.0.1:8787 {
         header_up X-Real-IP {remote_host}
     }
