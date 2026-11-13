@@ -1,6 +1,6 @@
 # Автоматический деплой GitHub → VPS
 
-Рабочий сайт: **https://tko.megaev.ru**. Репозиторий:
+Рабочий сайт: **https://ioo.megaev.ru**. Репозиторий:
 `KAMegaev/tko-ioo`, ветка `main`, VPS `185.200.179.49`.
 
 При каждом push в `main` workflow **«Тесты и деплой на VPS»**:
@@ -69,7 +69,7 @@ job готовности проверяет их до входа в окруже
 https://github.com/KAMegaev/tko-ioo/actions/workflows/tests.yml
 
 Выбрать **Run workflow → Branch: main → Run workflow**. Дождаться зелёного
-job **«Деплой на tko.megaev.ru»**. Если job пропущен, сначала проверить оба
+job **«Деплой на ioo.megaev.ru»**. Если job пропущен, сначала проверить оба
 Repository secrets. После этого новые изменения в `main` доставляются автоматически.
 
 Обновление выполняется без `npm install` на VPS: backend не имеет production

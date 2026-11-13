@@ -43,7 +43,7 @@ jobs:
           echo 'ready=true' >> "$GITHUB_OUTPUT"
 
   deploy:
-    name: Деплой на tko.megaev.ru
+    name: Деплой на ioo.megaev.ru
     needs: [test, ssh-config]
     if: github.ref == 'refs/heads/main' && needs.ssh-config.outputs.ready == 'true'
     runs-on: ubuntu-latest
@@ -53,7 +53,7 @@ jobs:
       cancel-in-progress: false
     environment:
       name: production
-      url: https://tko.megaev.ru
+      url: https://ioo.megaev.ru
     steps:
       - name: Подключиться к VPS и обновить проверенный коммит
         env:
@@ -81,6 +81,6 @@ jobs:
       - name: Проверить HTTPS после деплоя
         run: |
           set -euo pipefail
-          test "$(curl --fail --silent --show-error --max-time 30 https://tko.megaev.ru/healthz)" = '{"status":"ok"}'
-          curl --fail --silent --show-error --max-time 30 https://tko.megaev.ru/js/runtime-config.js | grep -q 'serverMode.*true'
-          echo "Опубликован коммит $GITHUB_SHA: https://tko.megaev.ru" >> "$GITHUB_STEP_SUMMARY"
+          test "$(curl --fail --silent --show-error --max-time 30 https://ioo.megaev.ru/healthz)" = '{"status":"ok"}'
+          curl --fail --silent --show-error --max-time 30 https://ioo.megaev.ru/js/runtime-config.js | grep -q 'serverMode.*true'
+          echo "Опубликован коммит $GITHUB_SHA: https://ioo.megaev.ru" >> "$GITHUB_STEP_SUMMARY"

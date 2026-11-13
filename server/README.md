@@ -1,6 +1,6 @@
 # Размещение на VPS Ubuntu 24.04
 
-Подготовленная схема для `tko.megaev.ru` → `185.200.179.49`:
+Подготовленная схема для `ioo.megaev.ru` → `185.200.179.49`:
 
 ```
 Браузер ──HTTPS──> Nginx/Caddy ──127.0.0.1:8787──> Node.js ──HTTPS + ключ──> OpenAI
@@ -66,7 +66,7 @@ sudo nano /etc/tko-ioo.env
 ```
 
 Задать `OPENAI_API_KEY`. Оставить `TKO_PUBLIC_ACCESS=true` для открытого сайта
-и `PUBLIC_ORIGIN=https://tko.megaev.ru`. Начальный общий лимит — 50 обращений
+и `PUBLIC_ORIGIN=https://ioo.megaev.ru`. Начальный общий лимит — 50 обращений
 к ИИ в день по московскому времени; `MAX_DAILY_REQUESTS` можно изменить.
 Счётчик сохраняется между перезапусками, при ошибке записи обращения к ИИ
 приостанавливаются. Запросы к провайдеру с ошибками тоже расходуют этот лимит.
@@ -90,7 +90,7 @@ curl --fail http://127.0.0.1:8787/healthz
 В DNS-зоне `megaev.ru` создать отдельную A-запись:
 
 ```
-tko    A    185.200.179.49
+ioo    A    185.200.179.49
 ```
 
 Проверить A- и AAAA-записи: у нового поддомена не должно быть старого IPv6,
@@ -103,7 +103,7 @@ tko    A    185.200.179.49
   Выпустить сертификат только для нового поддомена:
 
   ```bash
-  sudo certbot certonly --webroot -w /var/www/letsencrypt -d tko.megaev.ru
+  sudo certbot certonly --webroot -w /var/www/letsencrypt -d ioo.megaev.ru
   ```
 
   Затем добавить `deploy/nginx-https.conf`, снова `nginx -t` и reload.
@@ -116,7 +116,7 @@ tko    A    185.200.179.49
 
 ## 4. Проверка перед использованием
 
-Открыть `https://tko.megaev.ru`. В открытом режиме пароль не запрашивается.
+Открыть `https://ioo.megaev.ru`. В открытом режиме пароль не запрашивается.
 Надпись подключения должна сообщать «OpenAI через сервер сайта». Поля API-ключа
 в браузере быть не должно. В Network обращения идут только к домену сайта,
 AI-запросы — `POST /api/ai`. Проверить PDF, DOCX и расчёт с реестром.
@@ -135,4 +135,4 @@ Backend не пишет тела документов или значения к
 
 После проверки сайта настроить автоматический деплой GitHub → VPS по
 [инструкции](deploy/README.md). Workflow Pages удалён; уже опубликованный старый
-сайт снять через Settings → Pages → Unpublish site. Основной адрес — `https://tko.megaev.ru`.
+сайт снять через Settings → Pages → Unpublish site. Основной адрес — `https://ioo.megaev.ru`.
