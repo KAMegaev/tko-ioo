@@ -12,11 +12,15 @@ LOCK_FILE=/home/tko-deploy/deploy.lock
 NGINX=/usr/sbin/nginx
 SYSTEMCTL=/usr/bin/systemctl
 CURL=/usr/bin/curl
+WAIT_ATTEMPTS=30
+WAIT_DELAY=1
 BACKUP=
 FILES=()
 
 rollback_domain() {
   local status=$? file name
+  # ERR наследуется подстановками команд. Восстановление выполняет только основной процесс.
+  if ((BASH_SUBSHELL)); then return "$status"; fi
   trap - ERR
   echo 'Переключение не прошло проверку. Восстанавливаю прежние настройки.' >&2
   for file in "${FILES[@]}"; do
@@ -31,6 +35,27 @@ rollback_domain() {
   if "$NGINX" -t; then "$SYSTEMCTL" reload nginx || true; fi
   echo "Резервная копия: $BACKUP" >&2
   exit "$status"
+}
+
+wait_for_domain() {
+  local attempt body code=unknown
+  for ((attempt = 0; attempt < WAIT_ATTEMPTS; attempt++)); do
+    # reload посылает сигнал master; новые worker и сертификат готовы не сразу.
+    # Повторяем запрос с обычной проверкой TLS, включая временный curl 60.
+    if body=$("$CURL" --fail --silent --show-error --connect-timeout 3 --max-time 5 \
+      https://ioo.megaev.ru/healthz 2>"$BACKUP/domain-check.log") && [[ "$body" == '{"status":"ok"}' ]]; then
+      # Некорректная задача даёт 400, отказ Origin — 403. К ИИ запрос не отправляется.
+      if code=$("$CURL" --silent --show-error --connect-timeout 3 --max-time 5 --output /dev/null --write-out '%{http_code}' \
+        -H 'Origin: https://ioo.megaev.ru' -H 'Content-Type: application/json' \
+        --data '{"task":"domain-check"}' https://ioo.megaev.ru/api/ai 2>"$BACKUP/domain-check.log") && [[ "$code" == 400 ]]; then
+        return 0
+      fi
+    fi
+    if ((attempt + 1 < WAIT_ATTEMPTS)); then sleep "$WAIT_DELAY"; fi
+  done
+  echo "Новый домен не стал доступен после $WAIT_ATTEMPTS проверок. Код API: $code." >&2
+  cat "$BACKUP/domain-check.log" >&2
+  return 1
 }
 
 switch_domain() {
@@ -56,14 +81,7 @@ switch_domain() {
   chmod 600 "$ENV_FILE"
   "$SYSTEMCTL" restart tko-ioo.service
   "$SYSTEMCTL" reload nginx
-  local body code
-  body=$("$CURL" --fail --silent --show-error --retry 5 --retry-connrefused --retry-delay 1 --max-time 20 https://ioo.megaev.ru/healthz)
-  [[ "$body" == '{"status":"ok"}' ]]
-  # Некорректная задача должна дать 400, а не отказ Origin (403). Запрос к ИИ не отправляется.
-  code=$("$CURL" --silent --show-error --max-time 20 --output /dev/null --write-out '%{http_code}' \
-    -H 'Origin: https://ioo.megaev.ru' -H 'Content-Type: application/json' \
-    --data '{"task":"domain-check"}' https://ioo.megaev.ru/api/ai)
-  [[ "$code" == 400 ]]
+  wait_for_domain
   trap - ERR
   echo 'Готово: https://ioo.megaev.ru. Старый адрес отключён без перенаправления.'
   echo "Резервная копия настроек (доступна только root): $BACKUP"
